@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "title": "Tablet manufacturing",
+  "industry": "Pharmaceutical",
+  "description": "Illustrative prototype values for a guided demo. Not a validated production recipe.",
+  "steps": [
+    { "id": "granulation", "name": "Granulation", "description": "Capture mixer conditions and moisture before compression.", "parameters": [
+      { "key": "temperature", "label": "Temperature", "unit": "°C", "min": 45, "max": 50, "required": true },
+      { "key": "mixer_rpm", "label": "Mixer speed", "unit": "RPM", "min": 380, "max": 420, "required": true },
+      { "key": "moisture", "label": "Moisture", "unit": "%", "min": 0, "max": 2.5, "required": true }
+    ]},
+    { "id": "compression", "name": "Compression", "description": "Check tablet mass and hardness.", "parameters": [
+      { "key": "tablet_weight", "label": "Tablet weight", "unit": "mg", "min": 495, "max": 505, "required": true },
+      { "key": "hardness", "label": "Hardness", "unit": "kp", "min": 6, "max": 8, "required": true }
+    ]},
+    { "id": "coating", "name": "Coating", "description": "Capture the coating stage measurements.", "parameters": [
+      { "key": "coating_temp", "label": "Coating temperature", "unit": "°C", "min": 38, "max": 42, "required": true },
+      { "key": "weight_gain", "label": "Weight gain", "unit": "mg", "min": 10, "max": 14, "required": true }
+    ]}
+  ]
+}

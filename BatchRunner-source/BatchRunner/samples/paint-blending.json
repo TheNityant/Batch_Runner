@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "title": "Paint blending",
+  "industry": "Chemical / coatings",
+  "description": "Fictional demonstration recipe. No manufacturing specification is implied.",
+  "steps": [
+    { "id": "dispersion", "name": "Pigment dispersion", "description": "Monitor mixing and viscosity.", "parameters": [
+      { "key": "mixer_rpm", "label": "Mixer speed", "unit": "RPM", "min": 600, "max": 800, "required": true },
+      { "key": "viscosity", "label": "Viscosity", "unit": "cP", "min": 900, "max": 1200, "required": true }
+    ]},
+    { "id": "finishing", "name": "Finishing", "description": "Capture color and fill conditions.", "parameters": [
+      { "key": "temperature", "label": "Temperature", "unit": "°C", "min": 20, "max": 30, "required": true },
+      { "key": "fill_weight", "label": "Fill weight", "unit": "g", "min": 990, "max": 1010, "required": true }
+    ]}
+  ]
+}

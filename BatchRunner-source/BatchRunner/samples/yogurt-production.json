@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "title": "Yogurt production",
+  "industry": "Food & beverage",
+  "description": "Illustrative demo values only. Not a food safety plan or validated process.",
+  "steps": [
+    { "id": "pasteurization", "name": "Pasteurization", "description": "Log process temperature and hold time.", "parameters": [
+      { "key": "temperature", "label": "Temperature", "unit": "°C", "min": 72, "max": 90, "required": true },
+      { "key": "hold_time", "label": "Hold time", "unit": "seconds", "min": 15, "max": 120, "required": true }
+    ]},
+    { "id": "cooling", "name": "Cooling", "description": "Check temperature before culture addition.", "parameters": [
+      { "key": "temperature", "label": "Temperature", "unit": "°C", "min": 38, "max": 43, "required": true }
+    ]},
+    { "id": "fermentation", "name": "Fermentation", "description": "Record the final acidity.", "parameters": [
+      { "key": "ph", "label": "pH", "unit": "pH", "min": 4.4, "max": 4.6, "required": true }
+    ]}
+  ]
+}

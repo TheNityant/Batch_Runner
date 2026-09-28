@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101d28">
+  <title>BatchRunner — Voice-guided batch execution</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="BatchRunner home"><span class="brand-mark">B<span>↗</span></span><span>BatchRunner<small>VOICE EXECUTION STUDIO</small></span></a>
+      <div class="sidebar-label">WORKSPACE</div>
+      <nav aria-label="Sections">
+        <button class="nav-item selected" data-view="workspace"><span>▦</span> Execution workspace</button>
+        <button class="nav-item" data-view="templates"><span>▤</span> Batch templates</button>
+        <button class="nav-item" data-view="audit"><span>◷</span> Audit trail</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="demo-pill"><span class="live-dot"></span> PROTOTYPE ENVIRONMENT</div>
+        <p>Designed for a hands-free walk through of real batch logic.</p>
+        <button class="sidebar-guide" id="open-guide">↗ &nbsp; Open guided demo</button>
+      </div>
+    </aside>
+
+    <div class="page">
+      <header class="topbar"><div class="breadcrumbs">Workspace <span>/</span> <strong id="breadcrumb">Execution overview</strong></div><div class="top-right"><span class="clock" id="clock"></span><button class="icon-button" id="help-button" title="Open walkthrough" aria-label="Open walkthrough">?</button><span class="avatar">OP</span></div></header>
+      <main>
+        <section class="hero" id="hero">
+          <div><div class="eyebrow"><span class="eyebrow-line"></span> INDUSTRIAL WORKFLOW · VOICE FIRST</div><h1>From recipe to record.<br><em>One step at a time.</em></h1><p>Load a batch definition, speak process readings, and watch every value get checked against its configured limits.</p><div class="hero-actions"><button class="button primary" id="hero-demo">Take the guided demo <span>→</span></button><button class="button ghost" id="hero-template">Explore templates</button></div></div>
+          <div class="hero-visual" aria-hidden="true"><div class="orbit orbit-1"></div><div class="orbit orbit-2"></div><div class="visual-center"><div class="visual-icon">◈</div><div class="wavebars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><small>VOICE → VALIDATION → RECORD</small></div><span class="visual-tag t1">01 · CAPTURE</span><span class="visual-tag t2">02 · VERIFY</span><span class="visual-tag t3">03 · TRACE</span></div>
+        </section>
+
+        <section class="main-content">
+          <div class="section-head" id="workspace-head"><div><div class="eyebrow dark">THE WORKSPACE</div><h2>Choose a process to run</h2><p>Start with a sample, or bring your own JSON batch template.</p></div><button class="text-button" id="download-template">Download example JSON ↗</button></div>
+          <div class="template-grid" id="template-grid"></div>
+          <div class="upload-box" id="upload-zone"><span class="upload-icon">↥</span><div><strong>Have your own batch definition?</strong><p>Drop a .json file here or browse to upload · max 128 KB</p></div><button class="button outline" id="browse-button">Browse file</button><input id="file-input" type="file" accept=".json,application/json" hidden></div>
+
+          <section class="run-area hidden" id="run-area">
+            <div class="run-title"><div><div class="eyebrow dark">ACTIVE BATCH RUN</div><h2 id="run-title"></h2><p id="run-subtitle"></p></div><div class="run-title-actions"><span class="status-chip" id="run-chip"></span><button class="button outline small" id="export-button">↓ Export audit</button></div></div>
+            <div class="run-layout">
+              <div class="run-primary">
+                <div class="card progress-card"><div class="card-label">PROCESS ROUTE <span id="progress-caption"></span></div><div id="step-progress" class="step-progress"></div></div>
+                <div class="card step-card" id="step-card"><div class="step-card-head"><div><div class="eyebrow dark" id="step-counter"></div><h3 id="step-name"></h3><p id="step-description"></p></div><div class="step-symbol">◈</div></div><div class="parameter-table"><div class="table-head"><span>PARAMETER</span><span>ALLOWED RANGE</span><span>RECORDED</span><span>STATUS</span></div><div id="parameter-rows"></div></div><div class="step-footer"><div id="step-note">Required readings must be valid before moving ahead.</div><button class="button dark" id="complete-step">Complete step <span>→</span></button></div></div>
+                <div class="card audit-card" id="audit-card"><div class="card-head"><div><div class="eyebrow dark">EVERY CHANGE MATTERS</div><h3>Audit timeline</h3></div><span id="audit-count" class="count-badge">0 events</span></div><div id="audit-list" class="audit-list"></div></div>
+              </div>
+              <div class="run-aside">
+                <div class="voice-card" id="voice-card"><div class="voice-header"><span class="voice-icon">⌁</span><span id="voice-mode">VOICE AGENT</span><span class="voice-led" id="voice-led"></span></div><div class="voice-glyph"><div class="pulse-ring r1"></div><div class="pulse-ring r2"></div><span>◉</span></div><h3 id="voice-heading">Ready when you are</h3><p id="voice-description">Start the batch, then connect your microphone to capture readings by voice.</p><button class="button voice-button" id="voice-button">Start voice session <span>↗</span></button><p class="voice-note" id="voice-note"></p><div class="transcript" id="transcript" aria-live="polite"></div></div>
+                <div class="card try-card" id="try-card"><div class="eyebrow dark">TRY IT YOURSELF</div><h3>Put the rules to work</h3><p>These example phrases use the current step. Speak them to the agent, or use the controls below.</p><div id="scenario-list"></div></div>
+                <div class="card manual-card"><div class="eyebrow dark">ON-SCREEN FALLBACK</div><h3>Enter a reading</h3><p>Run the same backend validation without a microphone.</p><form id="reading-form"><label for="parameter-select">Parameter</label><select id="parameter-select"></select><label for="reading-value">Measured value</label><div class="input-row"><input id="reading-value" type="number" step="any" required placeholder="e.g. 47.3"><button class="button dark" type="submit">Record</button></div></form><div id="pending-actions"></div></div>
+              </div>
+            </div>
+          </section>
+        </section>
+      </main>
+      <footer>BatchRunner <span>·</span> Demo process values are illustrative and require site-specific validation before real use.</footer>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="tour-backdrop hidden" id="tour-backdrop"></div><div class="tour-popover hidden" id="tour-popover" role="dialog" aria-modal="true" aria-labelledby="tour-title"><div class="tour-top"><span id="tour-step-label"></span><button id="tour-close" aria-label="Close guide">×</button></div><h3 id="tour-title"></h3><p id="tour-body"></p><div class="tour-actions"><button class="text-button" id="tour-skip">Skip guide</button><button class="button primary" id="tour-next">Next →</button></div></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
