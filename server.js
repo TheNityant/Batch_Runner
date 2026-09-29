@@ -3,10 +3,11 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRun, act, DomainError } from './engine.js';
+import { loadRuns, saveRun } from './storage.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 3000);
-const runs = new Map();
+const runs = loadRuns();
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml' };
 
 function json(res, status, body) {
@@ -48,6 +49,7 @@ async function handler(req, res) {
     if (url.pathname === '/api/runs' && req.method === 'POST') {
       const input = await body(req);
       const run = createRun(input.template, input.operator);
+      saveRun(run);
       runs.set(run.id, run);
       return json(res, 201, { run });
     }
@@ -62,6 +64,7 @@ async function handler(req, res) {
       if (req.method === 'POST' && match[2] === 'actions') {
         const input = await body(req);
         const result = act(run, input.action, input.args);
+        saveRun(run);
         return json(res, 200, { result, run });
       }
     }
