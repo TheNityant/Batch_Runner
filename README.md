@@ -23,14 +23,14 @@ For live voice, keep one BatchRunner tab connected and close any AssemblyAI Play
 
 Import this repository with the repository root as the Vercel project root. The included `vercel.json` selects the **Other** framework, skips the build and publishes only `public/` as a static frontend. Set the production branch to `main`; do not set `npm start` as the Vercel build command. No AssemblyAI API key belongs in the frontend's Vercel environment.
 
-The static page loads before a backend exists, but recipes, readings, audit exports and voice need the `/api/` endpoints. Until the backend is connected, the page shows a backend notice. Run the Node server on a single HTTPS service with a persistent data volume and the production environment settings below. Once its URL is known, add an external rewrite for `/api/:path*` to `https://YOUR-BACKEND-HOST/api/:path*` in `vercel.json` and redeploy. Set `BATCHRUNNER_PUBLIC_ORIGIN` on that backend to the exact production Vercel origin, without a trailing slash.
+The included `vercel.json` forwards `/api/` requests to the Render service at `https://batch-runner.onrender.com`. Set `BATCHRUNNER_PUBLIC_ORIGIN` on Render to the exact production Vercel origin, without a trailing slash. If the Render service domain changes, update the rewrite destination and redeploy Vercel.
 
 ### Render backend
 
 1. Create a Render **Web Service** from this GitHub repository's `main` branch. Use the repository root, set **Language = Docker**, choose a region, and leave the Docker Command blank so the image entrypoint runs. The server listens on `0.0.0.0` and uses `PORT` (the Dockerfile defaults to 3000).
 2. In the service's Environment variables, set `ASSEMBLYAI_API_KEY`, `NODE_ENV=production`, `PORT=3000`, `BATCHRUNNER_PUBLIC_ORIGIN=https://YOUR-VERCEL-DOMAIN`, `BATCHRUNNER_SESSION_SECRET` (a stable secret of at least 32 random characters), and `BATCHRUNNER_DEMO_ACCESS_CODE` (a private code). Do not put any secret in Vercel or the repository. `BATCHRUNNER_DATA_DIR=/app/.data/runs` is already set in the Dockerfile.
-3. Set **Health Check Path = `/api/health`**. Deploy and open `https://YOUR-RENDER-DOMAIN/api/health`. It should report `ok`, `voiceConfigured`, and `deploymentReady` as `true`.
-4. Once the Render domain is known, add `{ "source": "/api/:path*", "destination": "https://YOUR-RENDER-DOMAIN/api/:path*" }` to the `rewrites` array in `vercel.json` and redeploy Vercel. Verify `https://YOUR-VERCEL-DOMAIN/api/health`, create a run, and test a spoken reading through the Vercel domain.
+3. Set **Health Check Path = `/api/health`**. Deploy and open `https://batch-runner.onrender.com/api/health`. It should report `ok`, `voiceConfigured`, and `deploymentReady` as `true`.
+4. Verify `https://YOUR-VERCEL-DOMAIN/api/health` after Vercel redeploys from `main`, then create a run and test a spoken reading through the Vercel domain. The health endpoint should also show `accessRequired: true`; enter the demo access code in the app before using voice.
 
 Render's **Free** web service can be used for an initial test, but it has no persistent disk and spins down when idle. Batch runs stored on its local filesystem will disappear on a restart, redeploy, or spin-down. For a review link that retains runs, choose a paid Render web service and attach a disk at `/app/.data`. The entrypoint prepares the mounted run directory and then starts Node as the unprivileged `node` user. Keep one instance because the JSON run store is local to this disk.
 
