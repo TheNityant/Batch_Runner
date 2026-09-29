@@ -33,7 +33,7 @@ export class VoiceSession {
     if (!navigator.mediaDevices?.getUserMedia || !window.AudioWorkletNode) throw new Error('Microphone and AudioWorklet require a supported browser and HTTPS or localhost.');
     let stream, context;
     try {
-      const response = await fetch('/api/voice-token', { method: 'POST' });
+      const response = await fetch('/api/voice-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: run.id }) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Could not create a voice token.');
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
@@ -104,7 +104,7 @@ export class VoiceSession {
         const { call } = item;
         if (!item.response) {
           try {
-            const result = await this.onTool(call.name, call.arguments || {});
+            const result = await this.onTool(call.name, call.arguments || {}, call.call_id);
             item.response = { type: 'tool.result', call_id: call.call_id, result: JSON.stringify(result) };
             item.result = result;
           } catch (error) {

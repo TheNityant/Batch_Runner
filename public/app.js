@@ -3,13 +3,16 @@ import { createBuilder } from './builder.js';
 
 const $ = selector => document.querySelector(selector);
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const view = { samples: [], run: null, voiceConfigured: false, voice: null, builder: null, tour: -1 };
+const view = { samples: [], run: null, voiceConfigured: false, voiceUnlocked: false, accessRequired: false, deploymentReady: true, voice: null, builder: null, tour: -1 };
 let toastTimer;
 
 async function api(path, method = 'GET', data) {
   const response = await fetch(path, { method, headers: data ? { 'Content-Type': 'application/json' } : {}, body: data ? JSON.stringify(data) : undefined });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+  if (!response.ok) {
+    if (payload.code === 'STALE_RUN' && payload.run) { view.run = payload.run; render(); }
+    throw new Error(payload.error || `Request failed (${response.status})`);
+  }
   return payload;
 }
 function toast(message, error = false) {
@@ -31,9 +34,9 @@ async function loadTemplate(template) {
   view.run = run; localStorage.setItem('batchrunner_run_id', run.id); render(); $('#run-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
   toast(`${run.template.title} loaded. Start the batch to record readings.`);
 }
-async function action(name, args = {}, quiet = false, fromVoice = false) {
+async function action(name, args = {}, quiet = false, fromVoice = false, requestId = crypto.randomUUID()) {
   if (!view.run) throw new Error('Load a template first.');
-  const { run, result } = await api(`/api/runs/${view.run.id}/actions`, 'POST', { action: name, args });
+  const { run, result } = await api(`/api/runs/${view.run.id}/actions`, 'POST', { action: name, args, requestId, expectedVersion: view.run.version || 0 });
   view.run = run; render();
   if (view.voice?.connected && result.stepChanged && !fromVoice) view.voice.updateContext(run);
   if (!quiet) toast(result.message, ['OUT_OF_RANGE', 'STEP_BLOCKED', 'CORRECTION_REQUIRED'].includes(result.code));
@@ -111,8 +114,10 @@ function renderVoice() {
   $('#voice-heading').textContent = connected ? 'Listening to your batch' : 'Ready when you are';
   $('#voice-description').textContent = connected ? 'Speak a reading, request the current step, or correct a value. You can interrupt the agent.' : view.run.status === 'ready' ? 'Start the batch, then connect your microphone to capture readings by voice.' : 'Connect your microphone to record readings hands-free.';
   $('#voice-button').textContent = connected ? 'End voice session' : 'Start voice session ↗';
-  $('#voice-button').disabled = view.run.status !== 'active' || (!connected && !view.voiceConfigured);
-  $('#voice-note').textContent = view.voiceConfigured ? 'Live AssemblyAI voice · microphone permission required' : 'Live voice needs ASSEMBLYAI_API_KEY on the server. On-screen demo is available.';
+  const locked = view.accessRequired && !view.voiceUnlocked;
+  $('#voice-access-form').classList.toggle('hidden', !view.voiceConfigured || !view.deploymentReady || !locked);
+  $('#voice-button').disabled = !connected && (view.run.status !== 'active' || !view.voiceConfigured || !view.deploymentReady || locked);
+  $('#voice-note').textContent = !view.voiceConfigured ? 'Live voice needs ASSEMBLYAI_API_KEY on the server. On-screen demo is available.' : !view.deploymentReady ? 'Production voice needs origin, session secret and demo access code configuration.' : locked ? 'Enter the demo access code to enable AssemblyAI voice.' : 'Live AssemblyAI voice · microphone permission required';
 }
 
 const tourSteps = [
@@ -166,6 +171,7 @@ function bind() {
   $('#reading-form').onsubmit = event => { event.preventDefault(); if (view.run?.status !== 'active') return toast('Start the batch first.', true); safeAction('record', { parameter: $('#parameter-select').value, value: Number($('#reading-value').value) }); $('#reading-value').value = ''; };
   $('#parameter-select').onchange = renderPending;
   $('#voice-button').onclick = async () => { try { if (view.voice?.connected) await view.voice.disconnect(); else await view.voice.connect(view.run); renderVoice(); } catch (e) { toast(e.message, true); renderVoice(); } };
+  $('#voice-access-form').onsubmit = async event => { event.preventDefault(); try { const state = await api('/api/voice-access', 'POST', { code: $('#voice-access-code').value }); view.voiceUnlocked = state.voiceUnlocked; $('#voice-access-code').value = ''; renderVoice(); toast('Voice access unlocked for this browser session.'); } catch (e) { toast(e.message, true); } };
   $('#export-button').onclick = () => { if (view.run) location.href = `/api/runs/${view.run.id}/export`; };
   $('#download-template').onclick = () => { const template = view.samples[0]?.template; if (template) downloadJson(template, 'batchrunner-example.json'); };
   $('#browse-button').onclick = () => $('#file-input').click();
@@ -185,11 +191,11 @@ async function init() {
   view.builder = createBuilder({ onLoad: loadTemplate, onError: message => toast(message, true) });
   try {
     const [samples, health] = await Promise.all([api('/api/samples'), api('/api/health')]);
-    view.samples = samples; view.voiceConfigured = health.voiceConfigured;
-    view.voice = new VoiceSession({ onTool: async (name, args) => {
+    view.samples = samples; Object.assign(view, { voiceConfigured: health.voiceConfigured, voiceUnlocked: health.voiceUnlocked, accessRequired: health.accessRequired, deploymentReady: health.deploymentReady });
+    view.voice = new VoiceSession({ onTool: async (name, args, callId) => {
       const operations = { record_reading: 'record', correct_reading: 'correct', confirm_deviation: 'confirm_deviation', complete_step: 'complete_step', get_batch_status: 'get_status' };
       if (!operations[name]) throw new Error('Unknown voice operation.');
-      const result = await action(operations[name], args, true, true);
+      const result = await action(operations[name], args, true, true, callId);
       return { ...result, batchStatus: view.run.status, currentStep: step().name };
     }, onTranscript: (speaker, content) => {
       $('#transcript').textContent = `${speaker}: ${content}`;
