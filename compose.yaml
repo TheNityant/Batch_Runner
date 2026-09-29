@@ -1,0 +1,14 @@
+services:
+  batchrunner:
+    build: .
+    env_file: .env
+    environment:
+      NODE_ENV: development
+      BATCHRUNNER_HOST: 0.0.0.0
+      BATCHRUNNER_DATA_DIR: /app/.data/runs
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - batchrunner_data:/app/.data
+volumes:
+  batchrunner_data:

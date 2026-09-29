@@ -38,13 +38,16 @@ test('step stays blocked for missing and out-of-range readings; correction prese
   assert.equal(act(run, 'record', { parameter: 'mass', value: 100 }).code, 'RECORDED');
   assert.equal(act(run, 'complete_step').code, 'RUN_COMPLETED');
   assert.equal(run.status, 'complete');
+  assert.match(act(run, 'get_status').message, /Batch complete/);
 });
 
 test('duplicate reading cannot silently overwrite and ambiguous values are rejected', () => {
   const run = createRun(template); act(run, 'start');
   act(run, 'record', { parameter: 'temp', value: 47 });
+  assert.equal(act(run, 'record', { parameter: 'temp', value: 47 }).code, 'ALREADY_RECORDED');
   assert.equal(act(run, 'record', { parameter: 'temp', value: 49 }).code, 'CORRECTION_REQUIRED');
   assert.equal(run.readings.mix.temp.value, 47);
+  assert.equal(run.events.some(e => e.type === 'READING_CONFLICT' && e.previousValue === 47 && e.value === 49), true);
   assert.throws(() => act(run, 'record', { parameter: 'rpm', value: '415' }), /finite numeric/);
   assert.throws(() => act(run, 'record', { parameter: 'unknown', value: 1 }), /Unknown parameter/);
 });
