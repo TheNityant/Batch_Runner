@@ -30,6 +30,7 @@ export class VoiceSession {
 
   async connect(run) {
     if (this.connected || this.ws) return;
+    this.lastConnectionError = null;
     if (!navigator.mediaDevices?.getUserMedia || !window.AudioWorkletNode) throw new Error('Microphone and AudioWorklet require a supported browser and HTTPS or localhost.');
     let stream, context;
     try {
@@ -44,6 +45,7 @@ export class VoiceSession {
       this.stream = stream; this.context = context; this.worklet = worklet; this.nextPlayback = context.currentTime;
       const url = new URL('wss://agents.assemblyai.com/v1/ws'); url.searchParams.set('token', payload.token);
       const ws = new WebSocket(url); this.ws = ws;
+       this.readyTimer = setTimeout(() => { if (!this.connected && this.ws === ws) { this.lastConnectionError = 'Voice setup timed out. Check your API key and network, then try again.'; ws.close(); } }, 15000);
       worklet.port.onmessage = event => {
         if (!this.connected || ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > 750_000) return;
         const bytes = new Uint8Array(event.data); let raw = '';
@@ -59,8 +61,8 @@ export class VoiceSession {
         } }));
       };
       ws.onmessage = event => { try { Promise.resolve(this.handle(JSON.parse(event.data))).catch(e => this.onStatus(e.message)); } catch (e) { this.onStatus(e.message); } };
-      ws.onerror = () => this.onStatus('Voice connection error. Try ending and restarting the session.');
-      ws.onclose = () => { this.cleanup(); this.onStatus('Voice session ended.'); };
+      ws.onerror = () => { this.lastConnectionError = 'Voice connection error. Check your key and network, then try again.'; };
+      ws.onclose = () => { const message = this.lastConnectionError || 'Voice session ended.'; this.cleanup(); this.onStatus(message); };
       this.onStatus('Connecting to AssemblyAI…');
     } catch (error) {
       stream?.getTracks().forEach(t => t.stop()); await context?.close();
@@ -74,9 +76,9 @@ export class VoiceSession {
 
   handle(event) {
     switch (event.type) {
-      case 'session.ready': this.connected = true; this.onStatus('Listening · AssemblyAI connected'); break;
+      case 'session.ready': clearTimeout(this.readyTimer); this.connected = true; this.onStatus('Listening · AssemblyAI connected'); break;
       case 'session.ended': this.ws?.close(); break;
-      case 'session.error': this.onStatus(`Voice error: ${event.message || event.code}`); break;
+      case 'session.error': this.lastConnectionError = `Voice error: ${event.message || event.code}`; this.onStatus(this.lastConnectionError); if (!this.connected) this.ws?.close(); break;
       case 'transcript.user': this.onTranscript('Operator', event.text); break;
       case 'transcript.agent': this.onTranscript('BatchRunner', event.text); break;
       case 'reply.audio': this.play(event.data); break;
@@ -154,9 +156,9 @@ export class VoiceSession {
   }
 
   cleanup() {
-    this.connected = false; this.pending = []; this.lastTurnEvent = null; this.processingTools = false; this.completedCalls.clear(); this.stopPlayback();
+    clearTimeout(this.readyTimer); this.connected = false; this.pending = []; this.lastTurnEvent = null; this.processingTools = false; this.completedCalls.clear(); this.stopPlayback();
     this.stream?.getTracks().forEach(track => track.stop()); this.stream = null;
     if (this.context && this.context.state !== 'closed') this.context.close();
-    this.context = null; this.worklet = null; this.ws = null;
+    this.context = null; this.worklet = null; this.ws = null; this.lastConnectionError = null;
   }
 }

@@ -8,6 +8,7 @@ import { checkOrigin, limit, requireJson, requireVoiceAccess, sessionFor, unlock
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 3000);
+const host = process.env.BATCHRUNNER_HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be between 1 and 65535.');
 const runs = loadRuns();
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml' };
@@ -19,11 +20,16 @@ function json(res, status, body) {
 async function body(req) {
   requireJson(req);
   let data = '';
+  let bytes = 0;
   for await (const chunk of req) {
+    bytes += chunk.length;
+    if (bytes > 128_000) throw new DomainError('JSON file is too large (128 KB maximum).', 413);
     data += chunk;
-    if (data.length > 128_000) throw new DomainError('JSON file is too large (128 KB maximum).', 413);
   }
-  try { return JSON.parse(data); } catch { throw new DomainError('Invalid JSON.'); }
+  let parsed;
+  try { parsed = JSON.parse(data); } catch { throw new DomainError('Invalid JSON.'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new DomainError('Expected a JSON object.');
+  return parsed;
 }
 function getRun(id, sessionId) {
   const run = runs.get(id);
@@ -123,5 +129,5 @@ async function handler(req, res) {
 }
 
 const server = http.createServer(handler);
-server.listen(port, () => console.log(`BatchRunner ready at http://localhost:${port}`));
+server.listen(port, host, () => console.log(`BatchRunner ready at http://${host}:${port}`));
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => process.exit(0)));

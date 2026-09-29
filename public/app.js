@@ -38,6 +38,10 @@ async function action(name, args = {}, quiet = false, fromVoice = false, request
   if (!view.run) throw new Error('Load a template first.');
   const { run, result } = await api(`/api/runs/${view.run.id}/actions`, 'POST', { action: name, args, requestId, expectedVersion: view.run.version || 0 });
   view.run = run; render();
+  if (name === 'record' && ['RECORDED', 'OUT_OF_RANGE'].includes(result.code)) {
+    const next = step().parameters.find(p => p.required && !run.readings[step().id]?.[p.key]);
+    if (next) { $('#parameter-select').value = next.key; renderPending(); }
+  }
   if (view.voice?.connected && result.stepChanged && !fromVoice) view.voice.updateContext(run);
   if (!quiet) toast(result.message, ['OUT_OF_RANGE', 'STEP_BLOCKED', 'CORRECTION_REQUIRED'].includes(result.code));
   return result;
@@ -75,7 +79,9 @@ function render() {
   $('#step-note').textContent = run.status === 'complete' ? 'All steps completed. Export the audit record.' : 'Required readings must be valid before moving ahead.';
   $('#audit-count').textContent = `${run.events.length} event${run.events.length === 1 ? '' : 's'}`;
   $('#audit-list').innerHTML = [...run.events].reverse().map(e => `<div class="audit-event ${/DEVIATION/.test(e.type) ? 'warning' : ''}"><span class="audit-bullet"></span><div><strong>${escapeHtml(e.message)}</strong><small>${new Date(e.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · ${escapeHtml(e.type.replaceAll('_', ' '))}</small></div></div>`).join('');
+  const previousParameter = $('#parameter-select').value;
   $('#parameter-select').innerHTML = current.parameters.map(p => `<option value="${escapeHtml(p.key)}">${escapeHtml(p.label)} (${escapeHtml(p.unit)})</option>`).join('');
+  if (current.parameters.some(p => p.key === previousParameter)) $('#parameter-select').value = previousParameter;
   renderPending(); renderScenarios(); renderVoice();
 }
 
@@ -168,7 +174,14 @@ function bind() {
   document.querySelectorAll('.nav-item').forEach(button => button.onclick = () => { document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('selected')); button.classList.add('selected'); if (button.dataset.view === 'builder') view.builder.open(); else { const target = button.dataset.view === 'audit' ? '#audit-card' : button.dataset.view === 'templates' ? '#workspace-head' : '#hero'; $(target)?.scrollIntoView({ behavior: 'smooth' }); } $('#breadcrumb').textContent = button.textContent.trim(); });
   $('#open-builder').onclick = () => view.builder.open();
   $('#complete-step').onclick = () => safeAction(view.run.status === 'ready' ? 'start' : 'complete_step');
-  $('#reading-form').onsubmit = event => { event.preventDefault(); if (view.run?.status !== 'active') return toast('Start the batch first.', true); safeAction('record', { parameter: $('#parameter-select').value, value: Number($('#reading-value').value) }); $('#reading-value').value = ''; };
+  $('#reading-form').onsubmit = async event => {
+    event.preventDefault();
+    if (view.run?.status !== 'active') return toast('Start the batch first.', true);
+    const raw = $('#reading-value').value;
+    if (raw === '' || !Number.isFinite(Number(raw))) return toast('Enter a numeric value.', true);
+    const result = await safeAction('record', { parameter: $('#parameter-select').value, value: Number(raw) });
+    if (result) $('#reading-value').value = '';
+  };
   $('#parameter-select').onchange = renderPending;
   $('#voice-button').onclick = async () => { try { if (view.voice?.connected) await view.voice.disconnect(); else await view.voice.connect(view.run); renderVoice(); } catch (e) { toast(e.message, true); renderVoice(); } };
   $('#voice-access-form').onsubmit = async event => { event.preventDefault(); try { const state = await api('/api/voice-access', 'POST', { code: $('#voice-access-code').value }); view.voiceUnlocked = state.voiceUnlocked; $('#voice-access-code').value = ''; renderVoice(); toast('Voice access unlocked for this browser session.'); } catch (e) { toast(e.message, true); } };

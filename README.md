@@ -11,9 +11,9 @@ Install Node.js 24.10 or later. There are no npm packages to install or frontend
 3. In the repository root, run `npm start` and open [http://localhost:3000](http://localhost:3000).
 4. Choose **Take the guided demo**. Start the batch before connecting voice. Allow microphone access when prompted.
 
-`npm start` loads `.env` automatically. On localhost, the production-only origin, secret and access-code settings should stay commented out. The on-screen workflow, validations and audit export run without an API key. Live voice needs a working AssemblyAI Voice Agent API key and an internet connection. Restart the server after changing `.env`.
+`npm start` loads `.env` automatically and binds to 127.0.0.1 by default. On localhost, the production-only origin, secret and access-code settings should stay commented out. The on-screen workflow, validations and audit export run without an API key. Live voice needs a working AssemblyAI Voice Agent API key and an internet connection. Restart the server after changing `.env`.
 
-**Docker alternative:** after creating `.env`, run `docker compose up --build`, then open [http://localhost:3000](http://localhost:3000). This local Compose configuration binds to 127.0.0.1 and keeps run data in a named volume; use `docker compose down` to stop it.
+**Docker alternative:** after creating `.env`, run `docker compose up --build`, then open [http://localhost:3000](http://localhost:3000). This local Compose configuration publishes only on 127.0.0.1 and keeps run data in a named volume; use `docker compose down` to stop it.
 
 ## Deploy a reviewable demo
 

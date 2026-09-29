@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 const template = { title: 'HTTP test', industry: 'Demo', steps: [{ id: 'mix', name: 'Mix', parameters: [{ key: 'temp', label: 'Temperature', unit: '°C', min: 45, max: 50 }] }] };
 
 async function start(port, directory, overrides = {}) {
-  const child = spawn(process.execPath, ['server.js'], { cwd: path.resolve('.'), env: { ...process.env, PORT: String(port), BATCHRUNNER_DATA_DIR: directory, ...overrides }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd: path.resolve('.'), env: { ...process.env, ASSEMBLYAI_API_KEY: '', PORT: String(port), BATCHRUNNER_DATA_DIR: directory, ...overrides }, stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Server did not start.')), 5000);
     child.stdout.once('data', () => { clearTimeout(timer); resolve(); });
@@ -55,6 +55,11 @@ test('HTTP actions validate and a run survives a restart', async () => {
     assert.equal(otherSession.status, 404);
     const unsupported = await request(`/api/runs/${run.id}/actions`, { method: 'POST', body: JSON.stringify({ action: 'get_status' }) });
     assert.equal(unsupported.status, 415);
+    for (const malformed of ['null', '[]', '"text"']) {
+      const invalid = await request('/api/runs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: malformed });
+      assert.equal(invalid.status, 400);
+      assert.match((await invalid.json()).error, /Expected a JSON object/);
+    }
     assert.equal((await (await action('record', { parameter: 'temp', value: 52 })).json()).result.code, 'OUT_OF_RANGE');
     const blocked = await (await action('complete_step')).json();
     assert.equal(blocked.result.code, 'STEP_BLOCKED');

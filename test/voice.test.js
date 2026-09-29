@@ -43,9 +43,19 @@ test('active step changes tool parameter enum and keyterms', () => {
     { id: 'two', name: 'Compression', parameters: [{ key: 'hardness', label: 'Hardness', unit: 'kp' }] }
   ] }, stepIndex: 0 };
   const first = sessionContext(run);
+  assert.equal(first.tools.filter(t => t.name === 'get_batch_status').length, 1);
   run.stepIndex = 1;
   const second = sessionContext(run);
   assert.deepEqual(first.tools.find(t => t.name === 'record_reading').parameters.properties.parameter.enum, ['mixer_rpm']);
   assert.deepEqual(second.tools.find(t => t.name === 'record_reading').parameters.properties.parameter.enum, ['hardness']);
   assert.ok(second.input.keyterms.includes('Compression'));
+});
+
+test('a session error before ready closes the pending connection', () => {
+  const { session } = harness();
+  let closed = false;
+  session.ws.close = () => { closed = true; };
+  session.handle({ type: 'session.error', code: 'unauthorized', message: 'Invalid token' });
+  assert.equal(closed, true);
+  assert.match(session.lastConnectionError, /Invalid token/);
 });
