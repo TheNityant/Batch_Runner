@@ -6,12 +6,18 @@ const TOOL_DEFINITIONS = [
   { type: 'function', name: 'complete_step', description: 'Attempt to complete the current process step only when asked. Backend may block missing or deviating readings.', parameters: { type: 'object', properties: {} } }
 ];
 
-function sessionContext(run) {
+export function sessionContext(run) {
   const step = run.template.steps[run.stepIndex];
   const parameters = step.parameters.map(p => `${p.key} (${p.label}, ${p.unit || 'unitless'})`).join('; ');
+  const keys = step.parameters.map(p => p.key);
+  const tools = structuredClone(TOOL_DEFINITIONS);
+  for (const tool of tools) {
+    if (tool.parameters.properties.parameter) tool.parameters.properties.parameter.enum = keys;
+  }
   return {
     system_prompt: `You are the BatchRunner voice assistant for batch ${run.batchCode}. Current product: ${run.template.title}. Current step: ${step.name}. Expected parameter keys: ${parameters}. Speak briefly and clearly. Use record_reading for new measurements and correct_reading for an explicit correction. For multiple numbers call a tool for each, one at a time. Use get_batch_status for questions about progress. Do not guess missing numeric values or silently reinterpret decimal points or units. If speech is ambiguous, read the value back and ask for clarification before calling a tool. Never decide whether a measurement is safe or valid yourself; the BatchRunner backend owns all limits and state. Report the tool result faithfully. For an out-of-range reading say the reported value and backend limit, then ask to confirm or correct. Never say a step has advanced until complete_step succeeds. A confirmed deviation still blocks advancement. If the operator interrupts, listen to the corrected value and call correct_reading when appropriate. This is a demonstration, not manufacturing authorization.`,
-    input: { keyterms: [run.batchCode, step.name, ...step.parameters.flatMap(p => [p.label, p.unit].filter(Boolean))].slice(0, 100), turn_detection: { interrupt_response: true } }
+    input: { keyterms: [run.batchCode, step.name, ...step.parameters.flatMap(p => [p.label, p.unit].filter(Boolean))].slice(0, 100), turn_detection: { interrupt_response: true } },
+    tools
   };
 }
 
@@ -19,6 +25,7 @@ export class VoiceSession {
   constructor({ onTool, onTranscript, onStatus, afterTool }) {
     this.onTool = onTool; this.onTranscript = onTranscript; this.onStatus = onStatus; this.afterTool = afterTool;
     this.connected = false; this.pending = []; this.scheduled = []; this.nextPlayback = 0;
+    this.lastTurnEvent = null; this.processingTools = false; this.completedCalls = new Set();
   }
 
   async connect(run) {
@@ -30,7 +37,7 @@ export class VoiceSession {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Could not create a voice token.');
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
-      context = new AudioContext(); await context.audioWorklet.addModule('/pcm-worklet.js');
+      context = new AudioContext(); await context.resume(); await context.audioWorklet.addModule('/pcm-worklet.js');
       const source = context.createMediaStreamSource(stream);
       const worklet = new AudioWorkletNode(context, 'capture-processor');
       source.connect(worklet).connect(context.destination);
@@ -43,11 +50,14 @@ export class VoiceSession {
         for (let i = 0; i < bytes.length; i++) raw += String.fromCharCode(bytes[i]);
         ws.send(JSON.stringify({ type: 'input.audio', audio: btoa(raw) }));
       };
-      ws.onopen = () => ws.send(JSON.stringify({ type: 'session.update', session: {
-        ...sessionContext(run), greeting: `Batch ${run.batchCode} is ready. We are at ${run.template.steps[run.stepIndex].name}. Please tell me the first reading.`,
-        output: { voice: 'alba', format: { encoding: 'audio/pcm' } }, tools: TOOL_DEFINITIONS,
-        input: { ...sessionContext(run).input, format: { encoding: 'audio/pcm' } }
-      } }));
+      ws.onopen = () => {
+        const context = sessionContext(run);
+        ws.send(JSON.stringify({ type: 'session.update', session: {
+          ...context, greeting: `Batch ${run.batchCode} is ready. We are at ${run.template.steps[run.stepIndex].name}. Please tell me the first reading.`,
+          output: { voice: 'alba', format: { encoding: 'audio/pcm' } },
+          input: { ...context.input, format: { encoding: 'audio/pcm' } }
+        } }));
+      };
       ws.onmessage = event => { try { Promise.resolve(this.handle(JSON.parse(event.data))).catch(e => this.onStatus(e.message)); } catch (e) { this.onStatus(e.message); } };
       ws.onerror = () => this.onStatus('Voice connection error. Try ending and restarting the session.');
       ws.onclose = () => { this.cleanup(); this.onStatus('Voice session ended.'); };
@@ -62,31 +72,53 @@ export class VoiceSession {
     if (this.ws?.readyState === WebSocket.OPEN && this.connected) this.ws.send(JSON.stringify({ type: 'session.update', session: sessionContext(run) }));
   }
 
-  async handle(event) {
+  handle(event) {
     switch (event.type) {
       case 'session.ready': this.connected = true; this.onStatus('Listening · AssemblyAI connected'); break;
+      case 'session.ended': this.ws?.close(); break;
       case 'session.error': this.onStatus(`Voice error: ${event.message || event.code}`); break;
       case 'transcript.user': this.onTranscript('Operator', event.text); break;
       case 'transcript.agent': this.onTranscript('BatchRunner', event.text); break;
       case 'reply.audio': this.play(event.data); break;
-      case 'tool.call': this.pending.push(event); break;
+      case 'reply.started': this.lastTurnEvent = event.type; break;
+      case 'input.speech.started': this.lastTurnEvent = event.type; this.stopPlayback(); break;
+      case 'tool.call':
+        if (!this.completedCalls.has(event.call_id) && !this.pending.some(item => item.call.call_id === event.call_id)) {
+          this.pending.push({ call: event });
+        }
+        this.flushTools(); break;
       case 'reply.done':
-        if (event.status === 'interrupted') this.stopPlayback();
-        // The API requires tool.result after reply.done, even when tool.call arrived earlier.
-        await this.flushTools(); break;
+        this.lastTurnEvent = event.status === 'interrupted' ? 'interrupted' : 'reply.done';
+        if (event.status === 'interrupted') { this.stopPlayback(); this.pending = []; }
+        else this.flushTools();
+        break;
     }
   }
 
   async flushTools() {
-    while (this.pending.length && this.ws?.readyState === WebSocket.OPEN) {
-      const call = this.pending.shift();
-      try {
-        const result = await this.onTool(call.name, call.arguments || {});
-        this.ws.send(JSON.stringify({ type: 'tool.result', call_id: call.call_id, result: JSON.stringify(result) }));
-        this.afterTool?.(result);
-      } catch (e) {
-        this.ws.send(JSON.stringify({ type: 'tool.result', call_id: call.call_id, result: JSON.stringify({ error: e.message }), is_error: true }));
+    if (this.processingTools || this.lastTurnEvent !== 'reply.done') return;
+    this.processingTools = true;
+    try {
+      while (this.pending.length && this.lastTurnEvent === 'reply.done' && this.ws?.readyState === WebSocket.OPEN) {
+        const item = this.pending[0];
+        const { call } = item;
+        if (!item.response) {
+          try {
+            const result = await this.onTool(call.name, call.arguments || {});
+            item.response = { type: 'tool.result', call_id: call.call_id, result: JSON.stringify(result) };
+            item.result = result;
+          } catch (error) {
+            item.response = { type: 'tool.result', call_id: call.call_id, result: JSON.stringify({ error: error.message }), is_error: true };
+          }
+        }
+        if (this.lastTurnEvent !== 'reply.done' || this.pending[0] !== item || this.ws?.readyState !== WebSocket.OPEN) break;
+        this.ws.send(JSON.stringify(item.response));
+        this.completedCalls.add(call.call_id);
+        this.pending.shift();
+        if (item.result) this.afterTool?.(item.result);
       }
+    } finally {
+      this.processingTools = false;
     }
   }
 
@@ -108,12 +140,21 @@ export class VoiceSession {
   }
 
   async disconnect() {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: 'session.end' }));
-    this.ws?.close(); this.cleanup(); this.onStatus('Voice session ended.');
+    const ws = this.ws;
+    if (!ws) return;
+    this.stream?.getTracks().forEach(track => track.stop());
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'session.end' }));
+      await new Promise(resolve => {
+        const timer = setTimeout(() => { ws.close(); resolve(); }, 3000);
+        ws.addEventListener('close', () => { clearTimeout(timer); resolve(); }, { once: true });
+      });
+    } else ws.close();
+    this.cleanup(); this.onStatus('Voice session ended.');
   }
 
   cleanup() {
-    this.connected = false; this.pending = []; this.stopPlayback();
+    this.connected = false; this.pending = []; this.lastTurnEvent = null; this.processingTools = false; this.completedCalls.clear(); this.stopPlayback();
     this.stream?.getTracks().forEach(track => track.stop()); this.stream = null;
     if (this.context && this.context.state !== 'closed') this.context.close();
     this.context = null; this.worklet = null; this.ws = null;
