@@ -1,6 +1,6 @@
 # BatchRunner
 
-**Turn a batch recipe into a voice-executable process.** BatchRunner is a hackathon prototype for guided batch execution across industries. A manager loads a JSON process definition; an operator records readings by voice or on screen; a deterministic server validates each value, blocks missing or deviating steps, and keeps an audit timeline.
+**Turn a batch recipe into a voice-executable process.** BatchRunner is a deployable hackathon demo for guided batch execution across industries. A manager loads a JSON process definition; an operator records readings by voice or on screen; a deterministic server validates each value, blocks missing or deviating steps, and keeps an audit timeline.
 
 ## Try it locally
 
@@ -17,6 +17,23 @@ ASSEMBLYAI_API_KEY=your_key npm start
 ```
 
 Use HTTPS (or localhost) for microphone access. Do not expose the key to the browser. The server issues single-use temporary tokens. This implementation uses inline session configuration so each batch step can change the system prompt and transcription keyterms while the session is open.
+
+## Deploy a reviewable demo
+
+Run a **single server instance** with a persistent writable directory. The included `Dockerfile` runs as a non-root user; mount a persistent volume at `/app/.data` and expose port 3000 through an HTTPS reverse proxy. Set these environment variables in the hosting platform (the `.env.example` file is a reference and is not loaded automatically):
+
+| Variable | Purpose |
+| --- | --- |
+| `NODE_ENV=production` | Enables production configuration checks. |
+| `BATCHRUNNER_PUBLIC_ORIGIN` | Exact HTTPS origin, such as `https://demo.example.com`. |
+| `BATCHRUNNER_SESSION_SECRET` | Stable random secret of at least 32 characters, kept outside the repo. |
+| `BATCHRUNNER_DEMO_ACCESS_CODE` | Private code shared with judges to unlock live voice. |
+| `ASSEMBLYAI_API_KEY` | Server-side AssemblyAI credential. Add when available. |
+| `BATCHRUNNER_DATA_DIR` | Writable persistent run directory; Docker defaults to `/app/.data/runs`. |
+
+The on-screen demo works without AssemblyAI credentials. In production mode the voice button stays disabled until the origin, stable session secret and demo access code are configured. The API key never reaches the browser; the browser receives a single-use token only for an active run it owns. Each browser has a signed, HttpOnly session cookie, run access is scoped to that session, requests are version checked and retries carry an ID. Basic rate limits protect run creation, actions, access-code attempts and token minting. A server restart does not invalidate the session when its secret and data volume persist.
+
+Before sharing the URL, run `npm test`, check `/api/health`, complete the on-screen walkthrough, restart the server and verify the run resumes. Once the AssemblyAI key is set, run a real microphone session and test a valid value, a deviation, a correction, a step transition and a spoken interruption. GitHub Actions runs the automated checks on changes.
 
 ## Guided judge walkthrough
 
@@ -52,7 +69,7 @@ Run the engine, voice-event and HTTP checks with `npm test`. The `/api/health` e
 
 ## Prototype boundaries
 
-Run state is written to `.data/runs` and can be resumed in the same browser after a refresh or server restart. This local JSON store is for the prototype, not a production database. There is no user authentication, approval hierarchy, validated electronic signature, concurrency control, equipment connection, or regulatory compliance claim. Do not use this prototype for live production or safety decisions. Before a public multi-user deployment, add authentication, a transactional database, rate limiting, provenance for imported templates, and versioned approvals.
+Run state is written to `.data/runs` and can be resumed in the same browser after a refresh or server restart. This local JSON store supports **one server instance** and is not a transactional multi-instance database. The signed session cookie is browser isolation for a public demo, not named user authentication. The audit timeline is not tamper-evident. There is no approval hierarchy, validated electronic signature, equipment connection, or regulatory compliance claim. Do not use this prototype for live production or safety decisions. A real manufacturing deployment needs authenticated roles, a transactional database, managed backups, template provenance and approvals, operations monitoring, and domain-specific validation.
 
 ## Implementation references
 
