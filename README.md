@@ -25,15 +25,14 @@ Import this repository with the repository root as the Vercel project root. The 
 
 The static page loads before a backend exists, but recipes, readings, audit exports and voice need the `/api/` endpoints. Until the backend is connected, the page shows a backend notice. Run the Node server on a single HTTPS service with a persistent data volume and the production environment settings below. Once its URL is known, add an external rewrite for `/api/:path*` to `https://YOUR-BACKEND-HOST/api/:path*` in `vercel.json` and redeploy. Set `BATCHRUNNER_PUBLIC_ORIGIN` on that backend to the exact production Vercel origin, without a trailing slash.
 
-### Railway backend
+### Render backend
 
-1. Create a Railway project from this GitHub repository's `main` branch. Use the repository root as the service root. Railway detects the root `Dockerfile`; leave the start command unset so the image entrypoint runs.
-2. Attach a persistent volume to the service at **`/app/.data`**. Keep one replica; the run store is local to this volume. The entrypoint prepares the root-owned volume and then starts Node as the unprivileged `node` user.
-3. In Railway service variables, set `ASSEMBLYAI_API_KEY`, `NODE_ENV=production`, `BATCHRUNNER_PUBLIC_ORIGIN=https://YOUR-VERCEL-DOMAIN`, `BATCHRUNNER_SESSION_SECRET` (at least 32 random characters), and `BATCHRUNNER_DEMO_ACCESS_CODE` (a private code). `BATCHRUNNER_DATA_DIR=/app/.data/runs` is already set by the Dockerfile. Do not put the key, session secret or access code in `vercel.json` or the frontend.
-4. Set the Railway healthcheck path to **`/api/health`**, generate a public HTTPS domain, and check that its health response reports `voiceConfigured` and `deploymentReady` as `true`.
-5. Add the `/api/:path*` external rewrite in `vercel.json` to this Railway domain (preserving the `/api/` prefix), deploy the Vercel frontend, and open `https://YOUR-VERCEL-DOMAIN/api/health`. Then start a batch, record a reading, refresh the page, and test one voice reading.
+1. Create a Render **Web Service** from this GitHub repository's `main` branch. Use the repository root, set **Language = Docker**, choose a region, and leave the Docker Command blank so the image entrypoint runs. The server listens on `0.0.0.0` and uses `PORT` (the Dockerfile defaults to 3000).
+2. In the service's Environment variables, set `ASSEMBLYAI_API_KEY`, `NODE_ENV=production`, `PORT=3000`, `BATCHRUNNER_PUBLIC_ORIGIN=https://YOUR-VERCEL-DOMAIN`, `BATCHRUNNER_SESSION_SECRET` (a stable secret of at least 32 random characters), and `BATCHRUNNER_DEMO_ACCESS_CODE` (a private code). Do not put any secret in Vercel or the repository. `BATCHRUNNER_DATA_DIR=/app/.data/runs` is already set in the Dockerfile.
+3. Set **Health Check Path = `/api/health`**. Deploy and open `https://YOUR-RENDER-DOMAIN/api/health`. It should report `ok`, `voiceConfigured`, and `deploymentReady` as `true`.
+4. Once the Render domain is known, add `{ "source": "/api/:path*", "destination": "https://YOUR-RENDER-DOMAIN/api/:path*" }` to the `rewrites` array in `vercel.json` and redeploy Vercel. Verify `https://YOUR-VERCEL-DOMAIN/api/health`, create a run, and test a spoken reading through the Vercel domain.
 
-For example, after Railway supplies `https://batchrunner-production.up.railway.app`, the Vercel rewrite is `{ "source": "/api/:path*", "destination": "https://batchrunner-production.up.railway.app/api/:path*" }`. Replace this example with the actual Railway domain before deploying the rewrite. Keep the Railway volume attached on redeploys to retain runs.
+Render's **Free** web service can be used for an initial test, but it has no persistent disk and spins down when idle. Batch runs stored on its local filesystem will disappear on a restart, redeploy, or spin-down. For a review link that retains runs, choose a paid Render web service and attach a disk at `/app/.data`. The entrypoint prepares the mounted run directory and then starts Node as the unprivileged `node` user. Keep one instance because the JSON run store is local to this disk.
 
 ## Deploy a reviewable demo
 
