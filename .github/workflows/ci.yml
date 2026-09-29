@@ -3,6 +3,7 @@ on:
   push:
     branches: [main, 'codex/**']
   pull_request:
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -12,4 +13,47 @@ jobs:
         with:
           node-version: '24'
       - run: npm test
-      - run: node --check server.js && node --check public/app.js && node --check public/voice.js
+      - run: node --check server.js && node --check security.js && node --check public/app.js && node --check public/voice.js && node --check public/builder.js
+
+  local-launch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Launch with a key in .env
+        run: |
+          cp .env.example .env
+          sed -i 's/^ASSEMBLYAI_API_KEY=$/ASSEMBLYAI_API_KEY=ci-smoke-only/' .env
+          npm start > /tmp/batchrunner-start.log 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/batchrunner-health.json; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then cat /tmp/batchrunner-start.log; exit 1; fi
+          node -e "const fs=require('node:fs'); const state=JSON.parse(fs.readFileSync('/tmp/batchrunner-health.json')); if (!state.ok || !state.voiceConfigured) process.exit(1)"
+          curl -fsS http://127.0.0.1:3000/ | grep -q 'BatchRunner'
+
+  docker-launch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build and launch local Docker configuration
+        run: |
+          cp .env.example .env
+          docker compose up --build --detach
+          trap 'docker compose down --volumes' EXIT
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/batchrunner-docker-health.json; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then docker compose logs; exit 1; fi
+          node -e "const fs=require('node:fs'); const state=JSON.parse(fs.readFileSync('/tmp/batchrunner-docker-health.json')); if (!state.ok || state.voiceConfigured) process.exit(1)"
