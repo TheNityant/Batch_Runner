@@ -89,7 +89,7 @@ export function act(run, action, args = {}) {
   }
   if (action === 'get_status') {
     const step = run.template.steps[run.stepIndex];
-    return { message: `Current step: ${step.name}.`, status: run.status, step: step.name,
+    return { message: run.status === 'complete' ? `Batch complete. Final step: ${step.name}.` : `Current step: ${step.name}.`, status: run.status, step: step.name,
       readings: run.readings[step.id] || {}, missing: missing(run).map(p => p.label),
       parameters: step.parameters.map(p => ({ key: p.key, label: p.label, unit: p.unit, required: p.required, limit: limitText(p) })) };
   }

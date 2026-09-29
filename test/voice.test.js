@@ -49,6 +49,10 @@ test('active step changes tool parameter enum and keyterms', () => {
   assert.deepEqual(first.tools.find(t => t.name === 'record_reading').parameters.properties.parameter.enum, ['mixer_rpm']);
   assert.deepEqual(second.tools.find(t => t.name === 'record_reading').parameters.properties.parameter.enum, ['hardness']);
   assert.ok(second.input.keyterms.includes('Compression'));
+  run.status = 'complete';
+  const completed = sessionContext(run);
+  assert.deepEqual(completed.tools.map(tool => tool.name), ['get_batch_status']);
+  assert.match(completed.system_prompt, /is complete/);
 });
 
 test('a session error before ready closes the pending connection', () => {

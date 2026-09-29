@@ -38,6 +38,7 @@ test('step stays blocked for missing and out-of-range readings; correction prese
   assert.equal(act(run, 'record', { parameter: 'mass', value: 100 }).code, 'RECORDED');
   assert.equal(act(run, 'complete_step').code, 'RUN_COMPLETED');
   assert.equal(run.status, 'complete');
+  assert.match(act(run, 'get_status').message, /Batch complete/);
 });
 
 test('duplicate reading cannot silently overwrite and ambiguous values are rejected', () => {

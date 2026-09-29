@@ -42,7 +42,7 @@ async function action(name, args = {}, quiet = false, fromVoice = false, request
     const next = step().parameters.find(p => p.required && !run.readings[step().id]?.[p.key]);
     if (next) { $('#parameter-select').value = next.key; renderPending(); }
   }
-  if (view.voice?.connected && result.stepChanged && !fromVoice) view.voice.updateContext(run);
+  if (view.voice?.connected && (result.stepChanged || run.status === 'complete') && !fromVoice) view.voice.updateContext(run);
   if (!quiet) toast(result.message, ['OUT_OF_RANGE', 'STEP_BLOCKED', 'CORRECTION_REQUIRED'].includes(result.code));
   return result;
 }
@@ -117,8 +117,8 @@ function renderScenarios() {
 function renderVoice() {
   const connected = Boolean(view.voice?.connected);
   $('#voice-card').classList.toggle('active', connected);
-  $('#voice-heading').textContent = connected ? 'Listening to your batch' : 'Ready when you are';
-  $('#voice-description').textContent = connected ? 'Speak a reading, request the current step, or correct a value. You can interrupt the agent.' : view.run.status === 'ready' ? 'Start the batch, then connect your microphone to capture readings by voice.' : 'Connect your microphone to record readings hands-free.';
+  $('#voice-heading').textContent = connected ? (view.run.status === 'complete' ? 'Batch complete · final recap' : 'Listening to your batch') : 'Ready when you are';
+  $('#voice-description').textContent = connected ? (view.run.status === 'complete' ? 'Ask for final status, then export the audit record. Recording is closed.' : 'Speak a reading, request the current step, or correct a value. You can interrupt the agent.') : view.run.status === 'ready' ? 'Start the batch, then connect your microphone to capture readings by voice.' : view.run.status === 'complete' ? 'This batch is complete. Export the audit record.' : 'Connect your microphone to record readings hands-free.';
   $('#voice-button').textContent = connected ? 'End voice session' : 'Start voice session ↗';
   const locked = view.accessRequired && !view.voiceUnlocked;
   $('#voice-access-form').classList.toggle('hidden', !view.voiceConfigured || !view.deploymentReady || !locked);
@@ -212,7 +212,7 @@ async function init() {
       return { ...result, batchStatus: view.run.status, currentStep: step().name };
     }, onTranscript: (speaker, content) => {
       $('#transcript').textContent = `${speaker}: ${content}`;
-    }, onStatus: message => { renderVoice(); $('#voice-note').textContent = message; }, afterTool: result => { if (result.stepChanged) view.voice.updateContext(view.run); } });
+    }, onStatus: message => { renderVoice(); $('#voice-note').textContent = message; }, afterTool: result => { if (result.stepChanged || view.run.status === 'complete') view.voice.updateContext(view.run); } });
     renderSamples();
     const savedId = localStorage.getItem('batchrunner_run_id');
     if (savedId) {

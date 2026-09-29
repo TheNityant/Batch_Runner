@@ -11,6 +11,13 @@ export function sessionContext(run) {
   const parameters = step.parameters.map(p => `${p.key} (${p.label}, ${p.unit || 'unitless'})`).join('; ');
   const keys = step.parameters.map(p => p.key);
   const tools = structuredClone(TOOL_DEFINITIONS);
+  if (run.status === 'complete') {
+    return {
+      system_prompt: `Batch ${run.batchCode} for ${run.template.title} is complete. Tell the operator that the run is finished, and direct them to export the audit record on screen. Only use get_batch_status for final status questions. Do not record or correct further readings or claim authorization for manufacturing use.`,
+      input: { keyterms: [run.batchCode, run.template.title], turn_detection: { interrupt_response: true } },
+      tools: tools.filter(tool => tool.name === 'get_batch_status')
+    };
+  }
   for (const tool of tools) {
     if (tool.parameters.properties.parameter) tool.parameters.properties.parameter.enum = keys;
   }
