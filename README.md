@@ -1,6 +1,6 @@
 # BatchRunner
 
-**Version:** 0.2.0-rc.2 · local review release candidate
+**Version:** 0.2.0-rc.3 · local review release candidate
 
 **Turn a batch recipe into a voice-executable process.** BatchRunner is a deployable hackathon demo for guided batch execution across industries. A manager loads a JSON process definition; an operator records readings by voice or on screen; a deterministic server validates each value, blocks missing or deviating steps, and keeps an audit timeline.
 
@@ -14,6 +14,8 @@ Install Node.js 24.10 or later. There are no npm packages to install or frontend
 4. Choose **Take the guided demo**. Start the batch before connecting voice. Allow microphone access when prompted.
 
 `npm start` loads `.env` automatically and binds to 127.0.0.1 by default. On localhost, the production-only origin, secret and access-code settings should stay commented out. The on-screen workflow, validations and audit export run without an API key. Live voice needs a working AssemblyAI Voice Agent API key and an internet connection. Restart the server after changing `.env`.
+
+For live voice, keep one BatchRunner tab connected and close any AssemblyAI Playground session using the same microphone. Use headphones if speaker audio feeds back into the microphone. The agent waits for the server's reading validation before speaking and gives one response for each result.
 
 **Docker alternative:** after creating `.env`, run `docker compose up --build`, then open [http://localhost:3000](http://localhost:3000). This local Compose configuration publishes only on 127.0.0.1 and keeps run data in a named volume; use `docker compose down` to stop it.
 
