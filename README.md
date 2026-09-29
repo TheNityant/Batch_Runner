@@ -19,6 +19,12 @@ For live voice, keep one BatchRunner tab connected and close any AssemblyAI Play
 
 **Docker alternative:** after creating `.env`, run `docker compose up --build`, then open [http://localhost:3000](http://localhost:3000). This local Compose configuration publishes only on 127.0.0.1 and keeps run data in a named volume; use `docker compose down` to stop it.
 
+## Vercel frontend
+
+Import this repository with the repository root as the Vercel project root. The included `vercel.json` selects the **Other** framework, skips the build and publishes only `public/` as a static frontend. Set the production branch to `main`; do not set `npm start` as the Vercel build command. No AssemblyAI API key belongs in the frontend's Vercel environment.
+
+The static page loads before a backend exists, but recipes, readings, audit exports and voice need the `/api/` endpoints. Until the backend is connected, the page shows a backend notice. Run the Node server on a single HTTPS service with a persistent data volume and the production environment settings below. Once its URL is known, add an external rewrite for `/api/:path*` to `https://YOUR-BACKEND-HOST/api/:path*` in `vercel.json` and redeploy. Set `BATCHRUNNER_PUBLIC_ORIGIN` on that backend to the exact production Vercel origin, without a trailing slash.
+
 ## Deploy a reviewable demo
 
 Run a **single server instance** with a persistent writable directory. The included `Dockerfile` runs as a non-root user; mount a persistent volume at `/app/.data` and expose port 3000 through an HTTPS reverse proxy. Set these environment variables in the hosting platform (or provide them to your container runtime):

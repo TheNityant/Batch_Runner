@@ -220,6 +220,9 @@ async function init() {
       catch { localStorage.removeItem('batchrunner_run_id'); }
     }
     render();
-  } catch (e) { toast(`Could not load workspace: ${e.message}`, true); }
+  } catch (e) {
+    $('#workspace-head p').textContent = 'Backend not connected. Deploy the BatchRunner API and route /api requests to it to use recipes, readings and voice.';
+    toast(`Could not load workspace: ${e.message}`, true);
+  }
 }
 init();
