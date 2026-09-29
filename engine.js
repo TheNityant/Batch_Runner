@@ -99,7 +99,10 @@ export function act(run, action, args = {}) {
     const readings = state(run, step.id);
     const previous = readings[parameter.key];
     if (previous) {
-      return { code: 'CORRECTION_REQUIRED', message: `${parameter.label} already has a ${previous.value} ${parameter.unit} reading. Use a correction to change it.`, previous };
+      if (previous.value === value) return { code: 'ALREADY_RECORDED', message: `${parameter.label} ${value} ${parameter.unit} is already recorded. No duplicate was added.` };
+      event(run, 'READING_CONFLICT', `${parameter.label}: ${value} ${parameter.unit} conflicts with the recorded ${previous.value} ${parameter.unit}. Explicit correction required.`,
+        { stepId: step.id, parameter: parameter.key, value, previousValue: previous.value });
+      return { code: 'CORRECTION_REQUIRED', message: `${parameter.label} already has a ${previous.value} ${parameter.unit} reading. ${value} ${parameter.unit} was not substituted. Use a correction to change it.`, previous };
     }
     const ok = within(parameter, value);
     readings[parameter.key] = { value, status: ok ? 'valid' : 'pending', time: new Date().toISOString() };
