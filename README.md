@@ -2,25 +2,22 @@
 
 **Turn a batch recipe into a voice-executable process.** BatchRunner is a deployable hackathon demo for guided batch execution across industries. A manager loads a JSON process definition; an operator records readings by voice or on screen; a deterministic server validates each value, blocks missing or deviating steps, and keeps an audit timeline.
 
-## Try it locally
+## Run locally
 
-Requires Node.js 20 or later. No npm dependencies or build step.
+Install Node.js 24.10 or later. There are no npm packages to install or frontend build steps.
 
-```bash
-npm start
-```
+1. Copy `.env.example` to `.env` in the repository root (on Windows, use `copy .env.example .env`; on macOS/Linux, use `cp .env.example .env`).
+2. Paste your API key into `ASSEMBLYAI_API_KEY=` in `.env`. Leave it blank if you want to test the full on-screen demo first. Keep `.env` private.
+3. In the repository root, run `npm start` and open [http://localhost:3000](http://localhost:3000).
+4. Choose **Take the guided demo**. Start the batch before connecting voice. Allow microphone access when prompted.
 
-Open `http://localhost:3000`, select **Take the guided demo**, then follow the steps. Use **Recipe designer** to edit a sample or make a new batch definition with normal form controls; the JSON import and export work too. The on-screen controls work without API credentials. To enable live voice, set `ASSEMBLYAI_API_KEY` in the server environment and restart:
+`npm start` loads `.env` automatically. On localhost, the production-only origin, secret and access-code settings should stay commented out. The on-screen workflow, validations and audit export run without an API key. Live voice needs a working AssemblyAI Voice Agent API key and an internet connection. Restart the server after changing `.env`.
 
-```bash
-ASSEMBLYAI_API_KEY=your_key npm start
-```
-
-Use HTTPS (or localhost) for microphone access. Do not expose the key to the browser. The server issues single-use temporary tokens. This implementation uses inline session configuration so each batch step can change the system prompt and transcription keyterms while the session is open.
+**Docker alternative:** after creating `.env`, run `docker compose up --build`, then open [http://localhost:3000](http://localhost:3000). This local Compose configuration binds to 127.0.0.1 and keeps run data in a named volume; use `docker compose down` to stop it.
 
 ## Deploy a reviewable demo
 
-Run a **single server instance** with a persistent writable directory. The included `Dockerfile` runs as a non-root user; mount a persistent volume at `/app/.data` and expose port 3000 through an HTTPS reverse proxy. Set these environment variables in the hosting platform (the `.env.example` file is a reference and is not loaded automatically):
+Run a **single server instance** with a persistent writable directory. The included `Dockerfile` runs as a non-root user; mount a persistent volume at `/app/.data` and expose port 3000 through an HTTPS reverse proxy. Set these environment variables in the hosting platform (or provide them to your container runtime):
 
 | Variable | Purpose |
 | --- | --- |
@@ -31,7 +28,7 @@ Run a **single server instance** with a persistent writable directory. The inclu
 | `ASSEMBLYAI_API_KEY` | Server-side AssemblyAI credential. Add when available. |
 | `BATCHRUNNER_DATA_DIR` | Writable persistent run directory; Docker defaults to `/app/.data/runs`. |
 
-The on-screen demo works without AssemblyAI credentials. In production mode the voice button stays disabled until the origin, stable session secret and demo access code are configured. The API key never reaches the browser; the browser receives a single-use token only for an active run it owns. Each browser has a signed, HttpOnly session cookie, run access is scoped to that session, requests are version checked and retries carry an ID. Basic rate limits protect run creation, actions, access-code attempts and token minting. A server restart does not invalidate the session when its secret and data volume persist.
+For a public deployment, set `NODE_ENV=production`, use an HTTPS reverse proxy, and configure the production settings in the table; the local Compose file is intended for localhost review. The on-screen demo works without AssemblyAI credentials. In production mode the voice button stays disabled until the origin, stable session secret and demo access code are configured. The API key never reaches the browser; the browser receives a single-use token only for an active run it owns. Each browser has a signed, HttpOnly session cookie, run access is scoped to that session, requests are version checked and retries carry an ID. Basic rate limits protect run creation, actions, access-code attempts and token minting. A server restart does not invalidate the session when its secret and data volume persist.
 
 Before sharing the URL, run `npm test`, check `/api/health`, complete the on-screen walkthrough, restart the server and verify the run resumes. Once the AssemblyAI key is set, run a real microphone session and test a valid value, a deviation, a correction, a step transition and a spoken interruption. GitHub Actions runs the automated checks on changes.
 
