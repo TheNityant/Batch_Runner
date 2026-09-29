@@ -10,31 +10,85 @@ function harness() {
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-test('tool result is sent after reply.done for either event ordering', async () => {
-  for (const order of ['call-first', 'done-first']) {
-    const { session, sent } = harness();
-    const call = { type: 'tool.call', call_id: order, name: 'record_reading', arguments: { parameter: 'rpm', value: 415 } };
-    if (order === 'call-first') { session.handle(call); assert.equal(sent.length, 0); session.handle({ type: 'reply.done', status: 'completed' }); }
-    else { session.handle({ type: 'reply.done', status: 'completed' }); session.handle(call); }
-    await tick();
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].call_id, order);
-    assert.equal(JSON.parse(sent[0].result).args.value, 415);
-    session.handle(call); await tick();
-    assert.equal(sent.length, 1, 'a repeated call ID does not run twice');
-  }
+test('hold tool returns exactly one result after validation, without a reply.done gate', async () => {
+  const { session, sent } = harness();
+  let finish;
+  let calls = 0;
+  session.onTool = () => { calls++; return new Promise(resolve => { finish = resolve; }); };
+  session.handle({ type: 'reply.done', reply_id: 'previous-turn', status: 'completed' });
+  const call = { type: 'tool.call', call_id: 'reading-1', name: 'record_reading', arguments: { parameter: 'rpm', value: 850 } };
+  session.handle(call);
+  session.handle(call);
+  await tick();
+  assert.equal(calls, 1);
+  assert.equal(sent.length, 0, 'a previous reply.done does not speak over validation');
+  finish({ code: 'OUT_OF_RANGE', message: '850 RPM is outside 600–800 RPM. Confirm or correct it.' });
+  await tick();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].call_id, 'reading-1');
+  assert.match(JSON.parse(sent[0].result).message, /outside 600–800 RPM/);
+  session.handle(call); await tick();
+  assert.equal(sent.length, 1, 'repeated call ID does not run twice');
 });
 
-test('interrupted turn discards unexecuted tools and speech starts stop playback', async () => {
+test('multiple hold calls produce one spoken reply at a time', async () => {
   const { session, sent } = harness();
+  session.handle({ type: 'tool.call', call_id: 'first', name: 'record_reading', arguments: { parameter: 'rpm', value: 850 } });
+  session.handle({ type: 'tool.call', call_id: 'second', name: 'record_reading', arguments: { parameter: 'temp', value: 47 } });
+  await tick();
+  assert.deepEqual(sent.map(message => message.call_id), ['first']);
+  session.handle({ type: 'reply.done', reply_id: 'old-turn', status: 'completed' });
+  await tick();
+  assert.equal(sent.length, 1, 'a previous completion cannot release the next result');
+  session.handle({ type: 'reply.started', reply_id: 'answer-to-first' });
+  session.handle({ type: 'reply.done', reply_id: 'answer-to-first', status: 'completed' });
+  await tick();
+  assert.deepEqual(sent.map(message => message.call_id), ['first', 'second']);
+});
+
+test('step context updates before the tool result starts the next spoken reply', async () => {
+  const { session, sent } = harness();
+  session.onTool = async () => ({ code: 'STEP_ADVANCED', stepChanged: true });
+  session.afterTool = () => session.ws.send(JSON.stringify({ type: 'session.update', session: { system_prompt: 'New step' } }));
+  session.handle({ type: 'tool.call', call_id: 'advance', name: 'complete_step', arguments: {} });
+  await tick();
+  assert.deepEqual(sent.map(message => message.type), ['session.update', 'tool.result']);
+});
+
+test('interruption clears playback but preserves an in-flight hold result', async () => {
+  const { session, sent } = harness();
+  let finish;
+  session.onTool = () => new Promise(resolve => { finish = resolve; });
   let stopped = 0;
   session.stopPlayback = () => { stopped++; };
-  session.handle({ type: 'tool.call', call_id: 'stale', name: 'complete_step', arguments: {} });
-  session.handle({ type: 'reply.done', status: 'interrupted' });
+  session.handle({ type: 'tool.call', call_id: 'held', name: 'record_reading', arguments: { parameter: 'rpm', value: 850 } });
+  session.handle({ type: 'reply.done', reply_id: 'older-reply', status: 'interrupted' });
   session.handle({ type: 'input.speech.started' });
+  finish({ code: 'OUT_OF_RANGE' });
+  await tick();
+  assert.equal(sent.length, 1);
+  assert.equal(stopped, 2);
+});
+
+test('a new reply stops buffered audio before it starts speaking', () => {
+  const { session } = harness();
+  let stopped = 0;
+  session.scheduled = [{ stop: () => { stopped++; } }];
+  session.handle({ type: 'reply.started', reply_id: 'next-reply' });
+  assert.equal(stopped, 1);
+  assert.deepEqual(session.scheduled, []);
+});
+
+test('a disconnected session cannot send a late validation result into the next session', async () => {
+  const { session, sent } = harness();
+  let finish;
+  session.onTool = () => new Promise(resolve => { finish = resolve; });
+  session.handle({ type: 'tool.call', call_id: 'old', name: 'record_reading', arguments: {} });
+  session.cleanup();
+  session.ws = { readyState: WebSocket.OPEN, send: message => sent.push(JSON.parse(message)) };
+  finish({ code: 'OUT_OF_RANGE' });
   await tick();
   assert.equal(sent.length, 0);
-  assert.equal(stopped, 2);
 });
 
 test('active step changes tool parameter enum and keyterms', () => {
@@ -44,6 +98,7 @@ test('active step changes tool parameter enum and keyterms', () => {
   ] }, stepIndex: 0 };
   const first = sessionContext(run);
   assert.equal(first.tools.filter(t => t.name === 'get_batch_status').length, 1);
+  assert.ok(first.tools.every(tool => tool.execution_mode === 'hold'));
   run.stepIndex = 1;
   const second = sessionContext(run);
   assert.deepEqual(first.tools.find(t => t.name === 'record_reading').parameters.properties.parameter.enum, ['mixer_rpm']);
@@ -52,6 +107,7 @@ test('active step changes tool parameter enum and keyterms', () => {
   run.status = 'complete';
   const completed = sessionContext(run);
   assert.deepEqual(completed.tools.map(tool => tool.name), ['get_batch_status']);
+  assert.equal(completed.tools[0].execution_mode, 'hold');
   assert.match(completed.system_prompt, /is complete/);
 });
 

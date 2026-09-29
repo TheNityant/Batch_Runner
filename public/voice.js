@@ -11,6 +11,8 @@ export function sessionContext(run) {
   const parameters = step.parameters.map(p => `${p.key} (${p.label}, ${p.unit || 'unitless'})`).join('; ');
   const keys = step.parameters.map(p => p.key);
   const tools = structuredClone(TOOL_DEFINITIONS);
+  // Validation must finish before the agent says whether a reading is in range.
+  for (const tool of tools) tool.execution_mode = 'hold';
   if (run.status === 'complete') {
     return {
       system_prompt: `Batch ${run.batchCode} for ${run.template.title} is complete. Tell the operator that the run is finished, and direct them to export the audit record on screen. Only use get_batch_status for final status questions. Do not record or correct further readings or claim authorization for manufacturing use.`,
@@ -22,7 +24,7 @@ export function sessionContext(run) {
     if (tool.parameters.properties.parameter) tool.parameters.properties.parameter.enum = keys;
   }
   return {
-    system_prompt: `You are the BatchRunner voice assistant for batch ${run.batchCode}. Current product: ${run.template.title}. Current step: ${step.name}. Expected parameter keys: ${parameters}. Speak briefly and clearly. Use record_reading for new measurements and correct_reading for an explicit correction. For multiple numbers call a tool for each, one at a time. Use get_batch_status for questions about progress. Do not guess missing numeric values or silently reinterpret decimal points or units. If speech is ambiguous, read the value back and ask for clarification before calling a tool. Never decide whether a measurement is safe or valid yourself; the BatchRunner backend owns all limits and state. Report the tool result faithfully. For an out-of-range reading say the reported value and backend limit, then ask to confirm or correct. Never say a step has advanced until complete_step succeeds. A confirmed deviation still blocks advancement. If the operator interrupts, listen to the corrected value and call correct_reading when appropriate. This is a demonstration, not manufacturing authorization.`,
+    system_prompt: `You are the BatchRunner voice assistant for batch ${run.batchCode}. Current product: ${run.template.title}. Current step: ${step.name}. Expected parameter keys: ${parameters}. Speak briefly and clearly. Use record_reading for each new measurement, once per spoken value, and correct_reading only for an explicit correction. For multiple numbers call a tool for each, one at a time. Use get_batch_status for questions about progress. Do not guess missing numeric values or silently reinterpret decimal points or units. If speech is ambiguous, ask for clarification before calling a tool. Never decide whether a measurement is safe or valid yourself; the BatchRunner backend owns all limits and state. Do not speak a range judgment, confirmation request, or another reading prompt while a tool is running. After its result, give one concise spoken response faithful to the backend message. For an out-of-range reading say the reported value and backend limit once, then ask one question: confirm that value or provide a correction. Do not ask to record the same property again unless the operator chooses to correct it. Never say a step has advanced until complete_step succeeds. A confirmed deviation still blocks advancement. If the operator interrupts, listen to the corrected value and call correct_reading when appropriate. This is a demonstration, not manufacturing authorization.`,
     input: { keyterms: [run.batchCode, step.name, ...step.parameters.flatMap(p => [p.label, p.unit].filter(Boolean))].slice(0, 100), turn_detection: { interrupt_response: true } },
     tools
   };
@@ -32,7 +34,8 @@ export class VoiceSession {
   constructor({ onTool, onTranscript, onStatus, afterTool }) {
     this.onTool = onTool; this.onTranscript = onTranscript; this.onStatus = onStatus; this.afterTool = afterTool;
     this.connected = false; this.pending = []; this.scheduled = []; this.nextPlayback = 0;
-    this.lastTurnEvent = null; this.processingTools = false; this.completedCalls = new Set();
+    this.processingTools = false; this.completedCalls = new Set(); this.generation = 0;
+    this.awaitingToolReply = false; this.resultReplyId = null;
   }
 
   async connect(run) {
@@ -52,7 +55,7 @@ export class VoiceSession {
       this.stream = stream; this.context = context; this.worklet = worklet; this.nextPlayback = context.currentTime;
       const url = new URL('wss://agents.assemblyai.com/v1/ws'); url.searchParams.set('token', payload.token);
       const ws = new WebSocket(url); this.ws = ws;
-       this.readyTimer = setTimeout(() => { if (!this.connected && this.ws === ws) { this.lastConnectionError = 'Voice setup timed out. Check your API key and network, then try again.'; ws.close(); } }, 15000);
+      this.readyTimer = setTimeout(() => { if (!this.connected && this.ws === ws) { this.lastConnectionError = 'Voice setup timed out. Check your API key and network, then try again.'; ws.close(); } }, 15000);
       worklet.port.onmessage = event => {
         if (!this.connected || ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > 750_000) return;
         const bytes = new Uint8Array(event.data); let raw = '';
@@ -89,26 +92,36 @@ export class VoiceSession {
       case 'transcript.user': this.onTranscript('Operator', event.text); break;
       case 'transcript.agent': this.onTranscript('BatchRunner', event.text); break;
       case 'reply.audio': this.play(event.data); break;
-      case 'reply.started': this.lastTurnEvent = event.type; break;
-      case 'input.speech.started': this.lastTurnEvent = event.type; this.stopPlayback(); break;
+      case 'reply.started':
+        // A new turn supersedes any buffered audio from the previous turn.
+        if (this.scheduled.length) this.stopPlayback();
+        if (this.awaitingToolReply && !this.resultReplyId) this.resultReplyId = event.reply_id;
+        break;
+      case 'input.speech.started': this.stopPlayback(); break;
       case 'tool.call':
         if (!this.completedCalls.has(event.call_id) && !this.pending.some(item => item.call.call_id === event.call_id)) {
           this.pending.push({ call: event });
         }
-        this.flushTools(); break;
+        void this.flushTools(); break;
       case 'reply.done':
-        this.lastTurnEvent = event.status === 'interrupted' ? 'interrupted' : 'reply.done';
-        if (event.status === 'interrupted') { this.stopPlayback(); this.pending = []; }
-        else this.flushTools();
+        if (event.status === 'interrupted') this.stopPlayback();
+        if (this.awaitingToolReply && this.resultReplyId && event.reply_id === this.resultReplyId) {
+          this.awaitingToolReply = false;
+          this.resultReplyId = null;
+          void this.flushTools();
+        }
         break;
     }
   }
 
   async flushTools() {
-    if (this.processingTools || this.lastTurnEvent !== 'reply.done') return;
+    // All batch tools use hold mode: tool.call has no preceding spoken reply
+    // to wait for. Sending on a stale reply.done can start a second voice turn.
+    if (this.processingTools || this.awaitingToolReply) return;
+    const generation = this.generation;
     this.processingTools = true;
     try {
-      while (this.pending.length && this.lastTurnEvent === 'reply.done' && this.ws?.readyState === WebSocket.OPEN) {
+      while (this.pending.length && !this.awaitingToolReply && generation === this.generation && this.ws?.readyState === WebSocket.OPEN) {
         const item = this.pending[0];
         const { call } = item;
         if (!item.response) {
@@ -120,14 +133,20 @@ export class VoiceSession {
             item.response = { type: 'tool.result', call_id: call.call_id, result: JSON.stringify({ error: error.message }), is_error: true };
           }
         }
-        if (this.lastTurnEvent !== 'reply.done' || this.pending[0] !== item || this.ws?.readyState !== WebSocket.OPEN) break;
+        if (generation !== this.generation || this.pending[0] !== item || this.ws?.readyState !== WebSocket.OPEN) break;
+        // Apply the next step's prompt before this result triggers speech.
+        if (item.result) {
+          try { this.afterTool?.(item.result); } catch (error) { this.onStatus(error.message); }
+        }
+        if (generation !== this.generation || this.ws?.readyState !== WebSocket.OPEN) break;
         this.ws.send(JSON.stringify(item.response));
         this.completedCalls.add(call.call_id);
         this.pending.shift();
-        if (item.result) this.afterTool?.(item.result);
+        // A result starts one spoken reply. Queue any other tool calls until it ends.
+        this.awaitingToolReply = true;
       }
     } finally {
-      this.processingTools = false;
+      if (generation === this.generation) this.processingTools = false;
     }
   }
 
@@ -163,7 +182,7 @@ export class VoiceSession {
   }
 
   cleanup() {
-    clearTimeout(this.readyTimer); this.connected = false; this.pending = []; this.lastTurnEvent = null; this.processingTools = false; this.completedCalls.clear(); this.stopPlayback();
+    clearTimeout(this.readyTimer); this.connected = false; this.pending = []; this.processingTools = false; this.completedCalls.clear(); this.generation++; this.awaitingToolReply = false; this.resultReplyId = null; this.stopPlayback();
     this.stream?.getTracks().forEach(track => track.stop()); this.stream = null;
     if (this.context && this.context.state !== 'closed') this.context.close();
     this.context = null; this.worklet = null; this.ws = null; this.lastConnectionError = null;
