@@ -1,8 +1,9 @@
 import { VoiceSession } from './voice.js';
+import { createBuilder } from './builder.js';
 
 const $ = selector => document.querySelector(selector);
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const view = { samples: [], run: null, voiceConfigured: false, voice: null, tour: -1 };
+const view = { samples: [], run: null, voiceConfigured: false, voice: null, builder: null, tour: -1 };
 let toastTimer;
 
 async function api(path, method = 'GET', data) {
@@ -18,11 +19,16 @@ function toast(message, error = false) {
 const step = () => view.run?.template.steps[view.run.stepIndex];
 const reading = key => view.run?.readings[step()?.id]?.[key];
 const limit = p => p.min != null && p.max != null ? `${p.min}–${p.max} ${p.unit}` : p.min != null ? `≥ ${p.min} ${p.unit}` : `≤ ${p.max} ${p.unit}`;
+function downloadJson(template, filename) {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' }));
+  link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
 
 async function loadTemplate(template) {
-  if (view.voice?.connected) await view.voice.disconnect();
+  if (view.voice?.ws) await view.voice.disconnect();
   const { run } = await api('/api/runs', 'POST', { template });
-  view.run = run; render(); $('#run-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  view.run = run; localStorage.setItem('batchrunner_run_id', run.id); render(); $('#run-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
   toast(`${run.template.title} loaded. Start the batch to record readings.`);
 }
 async function action(name, args = {}, quiet = false, fromVoice = false) {
@@ -30,15 +36,17 @@ async function action(name, args = {}, quiet = false, fromVoice = false) {
   const { run, result } = await api(`/api/runs/${view.run.id}/actions`, 'POST', { action: name, args });
   view.run = run; render();
   if (view.voice?.connected && result.stepChanged && !fromVoice) view.voice.updateContext(run);
-  if (!quiet) toast(result.message, result.code === 'OUT_OF_RANGE' || result.code === 'STEP_BLOCKED');
+  if (!quiet) toast(result.message, ['OUT_OF_RANGE', 'STEP_BLOCKED', 'CORRECTION_REQUIRED'].includes(result.code));
   return result;
 }
 const safeAction = async (name, args) => { try { return await action(name, args); } catch (e) { toast(e.message, true); } };
 
 function renderSamples() {
   const icons = ['✳', '◌', '⌘'];
-  $('#template-grid').innerHTML = view.samples.map((entry, i) => `<button class="template-card" data-sample="${i}"><div class="template-top"><span class="template-icon">${icons[i % 3]}</span><span class="template-industry">${escapeHtml(entry.template.industry)}</span></div><h3>${escapeHtml(entry.template.title)}</h3><p>${escapeHtml(entry.template.description)}</p><div class="template-meta"><span>${entry.template.steps.length} PROCESS STEPS</span><span>Load template →</span></div></button>`).join('');
+  $('#template-grid').innerHTML = view.samples.map((entry, i) => `<div class="template-card"><div class="template-top"><span class="template-icon">${icons[i % 3]}</span><span class="template-industry">${escapeHtml(entry.template.industry)}</span></div><h3>${escapeHtml(entry.template.title)}</h3><p>${escapeHtml(entry.template.description)}</p><div class="template-meta"><span>${entry.template.steps.length} PROCESS STEPS</span><span><button data-download="${i}">↓ JSON</button><button data-customize="${i}">Customize</button><button data-sample="${i}">Load →</button></span></div></div>`).join('');
   document.querySelectorAll('[data-sample]').forEach(button => button.onclick = () => loadTemplate(view.samples[Number(button.dataset.sample)].template).catch(e => toast(e.message, true)));
+  document.querySelectorAll('[data-customize]').forEach(button => button.onclick = () => view.builder.open(view.samples[Number(button.dataset.customize)].template));
+  document.querySelectorAll('[data-download]').forEach(button => button.onclick = () => { const sample = view.samples[Number(button.dataset.download)]; downloadJson(sample.template, sample.filename); });
 }
 
 function render() {
@@ -92,8 +100,8 @@ function renderScenarios() {
   const good = p.min !== null && p.max !== null ? Number(((p.min + p.max) / 2).toFixed(2)) : p.min ?? p.max;
   const bad = dev.max !== null ? Number((dev.max + Math.max(1, (dev.max - (dev.min ?? dev.max - 5)) * .15)).toFixed(2)) : dev.min - 1;
   el.innerHTML = `<div class="scenario"><small>01 · WITHIN LIMITS</small><p>“${escapeHtml(p.label)} ${good}.”</p><button data-scenario="good">Run example →</button></div><div class="scenario warning"><small>02 · TRIGGER A DEVIATION</small><p>“${escapeHtml(dev.label)} ${bad}.” <span class="muted">Allowed: ${escapeHtml(limit(dev))}</span></p><button data-scenario="bad">Run example →</button></div><div class="scenario"><small>03 · CORRECT THE RECORD</small><p>“Sorry, change ${escapeHtml(dev.label)} to ${dev.max !== null ? dev.max : dev.min}.”</p><button data-scenario="correct">Run example →</button></div>`;
-  el.querySelector('[data-scenario="good"]').onclick = () => safeAction(reading(p.key) ? 'correct' : 'record', { parameter: p.key, value: good, reason: 'Demo correction' });
-  el.querySelector('[data-scenario="bad"]').onclick = () => safeAction(reading(dev.key) ? 'correct' : 'record', { parameter: dev.key, value: bad, reason: 'Demo deviation' });
+  el.querySelector('[data-scenario="good"]').onclick = () => safeAction(reading(p.key) && reading(p.key).value !== good ? 'correct' : 'record', { parameter: p.key, value: good, reason: 'Demo correction' });
+  el.querySelector('[data-scenario="bad"]').onclick = () => safeAction(reading(dev.key) && reading(dev.key).value !== bad ? 'correct' : 'record', { parameter: dev.key, value: bad, reason: 'Demo deviation' });
   el.querySelector('[data-scenario="correct"]').onclick = () => safeAction('correct', { parameter: dev.key, value: dev.max ?? dev.min, reason: 'Spoken operator correction' });
 }
 
@@ -111,6 +119,7 @@ const tourSteps = [
   { title: 'Choose a sample process', body: 'Load the tablet batch. The same engine also accepts the yogurt, paint and your own JSON recipe.', target: '#template-grid', label: 'Load tablet demo', run: async () => loadTemplate(view.samples.find(x => x.filename.includes('tablet'))?.template || view.samples[0].template) },
   { title: 'A recipe becomes a workflow', body: 'Each step defines required parameters and numeric limits. Start the batch to unlock recording.', target: '#step-card', label: 'Start batch', run: () => action('start') },
   { title: 'Record a valid reading', body: 'Try saying “Temperature 47.3” with the live voice agent. This button sends that value through the same validation endpoint.', target: '#parameter-rows', label: 'Record 47.3 °C', run: () => action('record', { parameter: 'temperature', value: 47.3 }) },
+  { title: 'Catch a contradictory value', body: 'If the operator later says “Temperature 48.3” as a new reading, BatchRunner refuses to replace 47.3 silently. The conflict appears in the audit timeline.', target: '#audit-card', label: 'Try conflicting value', run: () => action('record', { parameter: 'temperature', value: 48.3 }) },
   { title: 'Missing values block progress', body: 'Try completing the step now. Mixer speed and moisture are still required, so the rule engine refuses to advance.', target: '#complete-step', label: 'Try completing step', run: () => action('complete_step') },
   { title: 'Trigger a deviation', body: 'Say “Mixer speed 435 RPM.” The configured maximum is 420. BatchRunner flags the value and requests confirmation.', target: '#parameter-rows', label: 'Record 435 RPM', run: () => action('record', { parameter: 'mixer_rpm', value: 435 }) },
   { title: 'Correct it without erasing history', body: 'Say “Sorry, change mixer speed to 415.” The new value passes; the original 435 remains in the audit record.', target: '#audit-card', label: 'Correct to 415 RPM', run: () => action('correct', { parameter: 'mixer_rpm', value: 415, reason: 'Operator correction' }) },
@@ -151,13 +160,14 @@ function bind() {
   $('#tour-close').onclick = $('#tour-skip').onclick = () => showTour(-1);
   $('#tour-next').onclick = tourNext;
   $('#hero-template').onclick = () => $('#workspace-head').scrollIntoView({ behavior: 'smooth' });
-  document.querySelectorAll('.nav-item').forEach(button => button.onclick = () => { document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('selected')); button.classList.add('selected'); const target = button.dataset.view === 'audit' ? '#audit-card' : button.dataset.view === 'templates' ? '#workspace-head' : '#hero'; $(target)?.scrollIntoView({ behavior: 'smooth' }); $('#breadcrumb').textContent = button.textContent.trim(); });
+  document.querySelectorAll('.nav-item').forEach(button => button.onclick = () => { document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('selected')); button.classList.add('selected'); if (button.dataset.view === 'builder') view.builder.open(); else { const target = button.dataset.view === 'audit' ? '#audit-card' : button.dataset.view === 'templates' ? '#workspace-head' : '#hero'; $(target)?.scrollIntoView({ behavior: 'smooth' }); } $('#breadcrumb').textContent = button.textContent.trim(); });
+  $('#open-builder').onclick = () => view.builder.open();
   $('#complete-step').onclick = () => safeAction(view.run.status === 'ready' ? 'start' : 'complete_step');
   $('#reading-form').onsubmit = event => { event.preventDefault(); if (view.run?.status !== 'active') return toast('Start the batch first.', true); safeAction('record', { parameter: $('#parameter-select').value, value: Number($('#reading-value').value) }); $('#reading-value').value = ''; };
   $('#parameter-select').onchange = renderPending;
   $('#voice-button').onclick = async () => { try { if (view.voice?.connected) await view.voice.disconnect(); else await view.voice.connect(view.run); renderVoice(); } catch (e) { toast(e.message, true); renderVoice(); } };
   $('#export-button').onclick = () => { if (view.run) location.href = `/api/runs/${view.run.id}/export`; };
-  $('#download-template').onclick = () => { const template = view.samples[0]?.template; if (!template) return; const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' })); link.download = 'batchrunner-example.json'; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000); };
+  $('#download-template').onclick = () => { const template = view.samples[0]?.template; if (template) downloadJson(template, 'batchrunner-example.json'); };
   $('#browse-button').onclick = () => $('#file-input').click();
   $('#file-input').onchange = event => upload(event.target.files?.[0]);
   const zone = $('#upload-zone'); zone.ondragover = event => { event.preventDefault(); zone.classList.add('dragging'); };
@@ -172,6 +182,7 @@ async function upload(file) {
 
 async function init() {
   bind(); $('#clock').textContent = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date());
+  view.builder = createBuilder({ onLoad: loadTemplate, onError: message => toast(message, true) });
   try {
     const [samples, health] = await Promise.all([api('/api/samples'), api('/api/health')]);
     view.samples = samples; view.voiceConfigured = health.voiceConfigured;
@@ -183,7 +194,13 @@ async function init() {
     }, onTranscript: (speaker, content) => {
       $('#transcript').textContent = `${speaker}: ${content}`;
     }, onStatus: message => { renderVoice(); $('#voice-note').textContent = message; }, afterTool: result => { if (result.stepChanged) view.voice.updateContext(view.run); } });
-    renderSamples(); render();
+    renderSamples();
+    const savedId = localStorage.getItem('batchrunner_run_id');
+    if (savedId) {
+      try { view.run = (await api(`/api/runs/${savedId}`)).run; }
+      catch { localStorage.removeItem('batchrunner_run_id'); }
+    }
+    render();
   } catch (e) { toast(`Could not load workspace: ${e.message}`, true); }
 }
 init();

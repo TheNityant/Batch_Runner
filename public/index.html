@@ -15,6 +15,7 @@
       <nav aria-label="Sections">
         <button class="nav-item selected" data-view="workspace"><span>▦</span> Execution workspace</button>
         <button class="nav-item" data-view="templates"><span>▤</span> Batch templates</button>
+        <button class="nav-item" data-view="builder"><span>✎</span> Recipe designer</button>
         <button class="nav-item" data-view="audit"><span>◷</span> Audit trail</button>
       </nav>
       <div class="sidebar-bottom">
@@ -33,9 +34,11 @@
         </section>
 
         <section class="main-content">
-          <div class="section-head" id="workspace-head"><div><div class="eyebrow dark">THE WORKSPACE</div><h2>Choose a process to run</h2><p>Start with a sample, or bring your own JSON batch template.</p></div><button class="text-button" id="download-template">Download example JSON ↗</button></div>
+          <div class="section-head" id="workspace-head"><div><div class="eyebrow dark">THE WORKSPACE</div><h2>Choose a process to run</h2><p>Start with a sample, or bring your own JSON batch template.</p></div><div class="section-actions"><button class="text-button" id="download-template">Download example JSON ↗</button><button class="button outline" id="open-builder">Create a recipe</button></div></div>
           <div class="template-grid" id="template-grid"></div>
           <div class="upload-box" id="upload-zone"><span class="upload-icon">↥</span><div><strong>Have your own batch definition?</strong><p>Drop a .json file here or browse to upload · max 128 KB</p></div><button class="button outline" id="browse-button">Browse file</button><input id="file-input" type="file" accept=".json,application/json" hidden></div>
+
+          <section class="builder-area hidden" id="builder-area"><div class="builder-header"><div><div class="eyebrow dark">CONFIGURATION MODE</div><h2>Recipe designer</h2><p>Define steps, measurements, and limits before the operator starts a run.</p></div><button class="icon-button" id="close-builder" aria-label="Close recipe designer">×</button></div><div class="builder-body"><div class="builder-basics"><label>Product / recipe name<input id="builder-title" placeholder="e.g. Ceramic glaze batch"></label><label>Industry<input id="builder-industry" placeholder="e.g. Materials"></label><label class="builder-wide">Description<input id="builder-description" placeholder="Short context for the operator"></label></div><div id="builder-steps"></div><button class="button outline" id="builder-add-step">+ Add process step</button><div class="builder-footer"><span>Limits are inclusive. Blank minimum or maximum means one-sided validation.</span><div><button class="button outline" id="builder-download">↓ Download JSON</button><button class="button dark" id="builder-run">Validate & load recipe →</button></div></div></div></section>
 
           <section class="run-area hidden" id="run-area">
             <div class="run-title"><div><div class="eyebrow dark">ACTIVE BATCH RUN</div><h2 id="run-title"></h2><p id="run-subtitle"></p></div><div class="run-title-actions"><span class="status-chip" id="run-chip"></span><button class="button outline small" id="export-button">↓ Export audit</button></div></div>
