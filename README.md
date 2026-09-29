@@ -25,6 +25,16 @@ Import this repository with the repository root as the Vercel project root. The 
 
 The static page loads before a backend exists, but recipes, readings, audit exports and voice need the `/api/` endpoints. Until the backend is connected, the page shows a backend notice. Run the Node server on a single HTTPS service with a persistent data volume and the production environment settings below. Once its URL is known, add an external rewrite for `/api/:path*` to `https://YOUR-BACKEND-HOST/api/:path*` in `vercel.json` and redeploy. Set `BATCHRUNNER_PUBLIC_ORIGIN` on that backend to the exact production Vercel origin, without a trailing slash.
 
+### Railway backend
+
+1. Create a Railway project from this GitHub repository's `main` branch. Use the repository root as the service root. Railway detects the root `Dockerfile`; leave the start command unset so the image entrypoint runs.
+2. Attach a persistent volume to the service at **`/app/.data`**. Keep one replica; the run store is local to this volume. The entrypoint prepares the root-owned volume and then starts Node as the unprivileged `node` user.
+3. In Railway service variables, set `ASSEMBLYAI_API_KEY`, `NODE_ENV=production`, `BATCHRUNNER_PUBLIC_ORIGIN=https://YOUR-VERCEL-DOMAIN`, `BATCHRUNNER_SESSION_SECRET` (at least 32 random characters), and `BATCHRUNNER_DEMO_ACCESS_CODE` (a private code). `BATCHRUNNER_DATA_DIR=/app/.data/runs` is already set by the Dockerfile. Do not put the key, session secret or access code in `vercel.json` or the frontend.
+4. Set the Railway healthcheck path to **`/api/health`**, generate a public HTTPS domain, and check that its health response reports `voiceConfigured` and `deploymentReady` as `true`.
+5. Add the `/api/:path*` external rewrite in `vercel.json` to this Railway domain (preserving the `/api/` prefix), deploy the Vercel frontend, and open `https://YOUR-VERCEL-DOMAIN/api/health`. Then start a batch, record a reading, refresh the page, and test one voice reading.
+
+For example, after Railway supplies `https://batchrunner-production.up.railway.app`, the Vercel rewrite is `{ "source": "/api/:path*", "destination": "https://batchrunner-production.up.railway.app/api/:path*" }`. Replace this example with the actual Railway domain before deploying the rewrite. Keep the Railway volume attached on redeploys to retain runs.
+
 ## Deploy a reviewable demo
 
 Run a **single server instance** with a persistent writable directory. The included `Dockerfile` runs as a non-root user; mount a persistent volume at `/app/.data` and expose port 3000 through an HTTPS reverse proxy. Set these environment variables in the hosting platform (or provide them to your container runtime):
