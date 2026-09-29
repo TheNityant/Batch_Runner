@@ -1,5 +1,7 @@
 # BatchRunner
 
+**Version:** 0.2.0-rc.2 · local review release candidate
+
 **Turn a batch recipe into a voice-executable process.** BatchRunner is a deployable hackathon demo for guided batch execution across industries. A manager loads a JSON process definition; an operator records readings by voice or on screen; a deterministic server validates each value, blocks missing or deviating steps, and keeps an audit timeline.
 
 ## Run locally
@@ -28,7 +30,7 @@ Run a **single server instance** with a persistent writable directory. The inclu
 | `ASSEMBLYAI_API_KEY` | Server-side AssemblyAI credential. Add when available. |
 | `BATCHRUNNER_DATA_DIR` | Writable persistent run directory; Docker defaults to `/app/.data/runs`. |
 
-For a public deployment, set `NODE_ENV=production`, use an HTTPS reverse proxy, and configure the production settings in the table; the local Compose file is intended for localhost review. The on-screen demo works without AssemblyAI credentials. In production mode the voice button stays disabled until the origin, stable session secret and demo access code are configured. The API key never reaches the browser; the browser receives a single-use token only for an active run it owns. Each browser has a signed, HttpOnly session cookie, run access is scoped to that session, requests are version checked and retries carry an ID. Basic rate limits protect run creation, actions, access-code attempts and token minting. A server restart does not invalidate the session when its secret and data volume persist.
+For a public deployment, set `NODE_ENV=production`, use an HTTPS reverse proxy, and configure the production settings in the table; the local Compose file is intended for localhost review. The on-screen demo works without AssemblyAI credentials. In production mode the voice button stays disabled until the origin, stable session secret and demo access code are configured. The API key never reaches the browser; the browser receives a single-use token only for an active run it owns. Each browser has a signed, HttpOnly session cookie, run access is scoped to that session, requests are version checked and retries carry an ID. Basic rate limits protect run creation, actions, access-code attempts and token minting. A server restart preserves run access when its secret and data volume persist; the voice access code must be entered again after restart.
 
 Before sharing the URL, run `npm test`, check `/api/health`, complete the on-screen walkthrough, restart the server and verify the run resumes. Once the AssemblyAI key is set, run a real microphone session and test a valid value, a deviation, a correction, a step transition and a spoken interruption. GitHub Actions runs the automated checks on changes.
 
